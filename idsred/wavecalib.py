@@ -1,16 +1,25 @@
 # ING-IDS lamps: https://www.ing.iac.es/astronomy/instruments/ids/wavelength_calibration.html
 
+import os
 import numpy as np
 import matplotlib.pyplot as plt
+from dotenv import dotenv_values
 
 from scipy.signal import find_peaks
 from astropy.stats import sigma_clip
 from scipy.optimize import minimize, curve_fit
+from ccdproc import CCDData
 
 import emcee
 import corner
 
 from lmfit import Minimizer, Parameters
+
+import warnings
+from astropy.utils.exceptions import AstropyWarning
+
+import idsred
+idsred_path = idsred.__path__[0]
 
 ################
 # ARC spectrum #
@@ -323,6 +332,16 @@ def chi_sq(params, arc_pixels, lamp_wave, sigmas=None, func='chebyshev', xmin=No
     return chi
 
 def prepare_params(params):
+    """Prepares the parameters to be used with the fitter.
+
+    Parameters
+    ----------
+    params
+
+    Returns
+    -------
+
+    """
     parameters = Parameters()
     for i, value in enumerate(params):
         if i == 0:
@@ -567,8 +586,48 @@ def check_solution(params, arc_pixels, lamp_wave, mask=None, data=None, func='le
     print(f'Residual mean: {mean:.1f} +/- {std:.1f} angstroms')
 
 
+def find_wavesol(func='chebyshev', k=5, niter=5, sigclip=2.5, plot_solution=False):
+    # load master ARC file
+    config = dotenv_values(".env")
+    PROCESSING = config['PROCESSING']
+    arc_file = os.path.join(PROCESSING, 'master_arc.fits')
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", AstropyWarning)
+        master_arc = CCDData.read(arc_file)
+
+    # fit and extract peak of the arc lamps
+    data = master_arc.data.T
+    arc_pixels, arc_peaks, arc_sigmas = find_arc_peaks(data, plot_solution=True, plot_diag=False)
+    start, step = 0, 2
+    arc_pixels, arc_peaks, arc_sigmas = arc_pixels[start::step], arc_peaks[start::step], arc_sigmas[start::step]
+
+    global idsred_path
+    lamp_file = os.path.join(idsred_path, 'lamps/CuArNe_high.dat')
+    lamp_wave = np.loadtxt(lamp_file).T
+    quick_wavelength_solution(arc_pixels, lamp_wave, None, None, func=func,
+                               niter=niter, sigclip=sigclip, k=k,
+                               plot_solution=plot_solution, data=data)
+
+
 def save_wavesol(func, xmin, xmax, coefs):
-    with open('wavesol.txt', 'w') as file:
+    """Saves the output of the wavelength solution.
+
+    Parameters
+    ----------
+    func
+    xmin
+    xmax
+    coefs
+
+    Returns
+    -------
+
+    """
+    config = dotenv_values(".env")
+    PROCESSING = config['PROCESSING']
+    wavesol_file = os.path.join(PROCESSING, 'wavesol.txt')
+
+    with open(wavesol_file, 'w') as file:
         file.write(f'function: {func}\n')
         file.write(f'xmin xmax: {xmin} {xmax}\n')
         coefs_str = ' '.join(str(coef) for coef in coefs)
@@ -576,7 +635,17 @@ def save_wavesol(func, xmin, xmax, coefs):
 
 
 def load_wavesol():
-    with open('wavesol.txt', 'r') as file:
+    """Loads the wavelength solution.
+
+    Returns
+    -------
+
+    """
+    config = dotenv_values(".env")
+    PROCESSING = config['PROCESSING']
+    wavesol_file = os.path.join(PROCESSING, 'wavesol.txt')
+
+    with open(wavesol_file, 'r') as file:
         lines = file.read().splitlines()
 
     func = lines[0].split(' ')[-1]
@@ -586,3 +655,19 @@ def load_wavesol():
     coefs = [float(coef) for coef in coefs_line[1:]]
 
     return func, xmin, xmax, coefs
+
+def apply_wavesol(xdata):
+    """Applies the wavelength solution to an array.
+
+    Parameters
+    ----------
+    xdata
+
+    Returns
+    -------
+
+    """
+    func, xmin, xmax, coefs = load_wavesol()
+    wavelengths = wavelength_function(coefs, xdata, func, xmin, xmax)
+
+    return wavelengths

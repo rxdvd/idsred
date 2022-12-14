@@ -1,8 +1,6 @@
 import os
 import numpy as np
 from dotenv import dotenv_values
-config = dotenv_values(".env")
-PROCESSING = config['PROCESSING']
 
 import astropy.units as u
 from astropy.io import fits
@@ -148,7 +146,8 @@ def create_master_bias(observations, subtract_overscan=True, trim_image=True,
     print(f'{len(bias_list)} images combined for the master BIAS')
     
     if save_output:
-        global PROCESSING
+        config = dotenv_values(".env")
+        PROCESSING = config['PROCESSING']
         outfile = os.path.join(PROCESSING, 'master_bias.fits')
         if not os.path.isdir(PROCESSING):
             os.mkdir(PROCESSING)
@@ -198,7 +197,8 @@ def create_master_flat(observations, master_bias=None, subtract_overscan=False,
     print(f'{len(flat_list)} images combined for the master FLAT')
     
     if save_output:
-        global PROCESSING
+        config = dotenv_values(".env")
+        PROCESSING = config['PROCESSING']
         outfile = os.path.join(PROCESSING, 'master_flat.fits')
         if not os.path.isdir(PROCESSING):
             os.mkdir(PROCESSING)
@@ -262,7 +262,8 @@ def create_master_arc(observations, beginning=True,
     print(f'{len(arc_list)} images combined for the master ARC')
 
     if save_output:
-        global PROCESSING
+        config = dotenv_values(".env")
+        PROCESSING = config['PROCESSING']
         outfile = os.path.join(PROCESSING, 'master_arc.fits')
         if not os.path.isdir(PROCESSING):
             os.mkdir(PROCESSING)
@@ -353,21 +354,21 @@ def reduce_images(observations, master_bias=None, master_flat=None, subtract_ove
             red_images.append(red_target)
             
             if save_output:
-                global PROCESSING
-                outfile = os.path.join(PROCESSING, f'{object_name}.fits')
+                config = dotenv_values(".env")
+                PROCESSING = config['PROCESSING']
+                outfile = os.path.join(PROCESSING, f'{object_name}_2d.fits')
                 if not os.path.isdir(PROCESSING):
                     os.mkdir(PROCESSING)
                 red_target.write(outfile, overwrite=True)
         
     return red_images
 
-def quick_reduction(observations=None, subtract_overscan=True, trim_image=True, method='average'):
+def quick_2Dreduction(observations=None, subtract_overscan=True, trim_image=True, method='average'):
 
     if observations is None:
         observations = collect_data()
 
+    create_master_arc(observations, beginning=True, method=method)
     master_bias = create_master_bias(observations, subtract_overscan, trim_image, method)
     master_flat = create_master_flat(observations, master_bias, subtract_overscan, trim_image, method)
-    red_images = reduce_images(observations, master_bias, master_flat, subtract_overscan, trim_image, method)
-
-    return red_images
+    _ = reduce_images(observations, master_bias, master_flat, subtract_overscan, trim_image, method)

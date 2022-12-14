@@ -1,25 +1,23 @@
 import numpy as np
 import matplotlib.pyplot as plt
 from dotenv import dotenv_values
-config = dotenv_values(".env")
-WORKDIR = config['WORKDIR']
 
 from ccdproc import CCDData
+from ccdproc import ImageFileCollection
 
 import warnings
 from astropy.utils.exceptions import AstropyWarning
 
 
-def collect_data(path=None)
+def collect_data(path=None):
 
-    if path is not None:
-        WORKDIR = path
-    else:
-        global WORKDIR
+    if path is None:
+        config = dotenv_values(".env")
+        path = config['WORKDIR']
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
-        observations = ImageFileCollection(WORKDIR)
+        observations = ImageFileCollection(path)
 
     return observations
 

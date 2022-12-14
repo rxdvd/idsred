@@ -1,10 +1,15 @@
+import os
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
+from dotenv import dotenv_values
+
+from ccdproc import CCDData
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 from astropy.stats import sigma_clip
 
-from utils import plot_image
+from .utils import plot_image
 
 import warnings
 from astropy.utils.exceptions import AstropyWarning
@@ -165,10 +170,14 @@ def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width
         if center is None or amp is None:
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", UserWarning)
-                peaks = find_peaks(profile, height=np.nanmedian(profile), prominence=50)[0]
-            amp = np.max(profile[peaks])
-            peak_id = np.argmax(profile[peaks])
-            center = peaks[peak_id]
+                peaks = find_peaks(profile, height=np.nanmedian(profile), prominence=10)[0]
+            if len(peaks)>0:
+                amp = np.max(profile[peaks])
+                peak_id = np.argmax(profile[peaks])
+                center = peaks[peak_id]
+            else:
+                amp = 10
+                center = len(profile)//2
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
@@ -282,11 +291,17 @@ def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width
         # sky with a fixed width
         imin = int(sky_bottom[i]-sky_width)
         imax = int(sky_bottom[i])
-        sky1 = np.nansum(data[imin:imax,i])
+        if len(data[imin:imax,i])==0:
+            sky1 = 0
+        else:
+            sky1 = np.nanmean(data[imin:imax,i])
         
         imin = int(sky_top[i])
         imax = int(sky_top[i]+sky_width)
-        sky2 = np.nansum(data[imin:imax,i])
+        if len(data[imin:imax,i])==0:
+            sky2 = 0
+        else:
+            sky2 = np.nanmean(data[imin:imax,i])
         
         # take the average sky of both sides
         sky = np.mean(sky1 + sky2) 
@@ -311,3 +326,23 @@ def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width
         plt.show()
     
     return raw_spectrum
+
+
+def quick_1Dreduction(plot_diag=False, plot_trace=False):
+    config = dotenv_values(".env")
+    PROCESSING = config['PROCESSING']
+
+    # get 2D reduced data
+    files = glob.glob(os.path.join(PROCESSING, '*_2d.fits'))
+    for file in files:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", AstropyWarning)
+            image = CCDData.read(file)
+
+        # extract trace
+        raw_spectrum = optimised_trace(image, plot_diag=plot_diag, plot_trace=plot_trace)
+        image.data = raw_spectrum
+
+        object_name = os.path.basename(file).split('_')[0]
+        outfile = os.path.join(PROCESSING, f'{object_name}_1d.fits')
+        image.write(outfile, overwrite=True)

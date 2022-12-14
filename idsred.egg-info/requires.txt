@@ -1,11 +1,5 @@
 numpy
-pandas
 matplotlib
 astropy
 ccdproc
-specutils
 python-dotenv
-scipy
-lmfit
-emcee
-corner
