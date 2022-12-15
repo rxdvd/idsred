@@ -275,9 +275,30 @@ def apply_sensfunc(wavelength, raw_flux):
 
     return wavelength, flux
 
+def calibrate_spectra():
+    config = dotenv_values(".env")
+    PROCESSING = config['PROCESSING']
+    files_path = os.path.join(PROCESSING, '*_1d.fits')
+    science_files = glob.glob(files_path)
 
+    for file in science_files:
+        # extract raw spectrum
+        hdu = fits.open(file)
+        header = hdu[0].header
+        raw_flux = hdu[0].data
+        raw_wave = np.arange(len(raw_flux))
 
+        # apply wavelength and flux calibration
+        cal_wave = apply_wavesol(raw_wave)
+        cal_wave, cal_flux = apply_sensfunc(cal_wave, raw_flux)
+        hdu[0].data = cal_flux
+        header['CRVAL1'] = cal_wave.min()  # initial wavelength
+        wave_diff = np.diff(cal_wave)
+        header['CD1_1'] = np.mean(wave_diff)  # mean increment per pixel
 
+        # save calibrated spectrum
+        outfile = file.replace('_1d', '_wf')
+        hdu.writeto(outfile, overwrite=True)
 
 def fit_calspec_continuum(calspec, window=None, plot=False):
     spectrum = Spectrum1D(flux=calspec['flux'].values * u.erg,

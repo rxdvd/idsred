@@ -60,3 +60,39 @@ def obs_plots(observations, obstype):
             warnings.simplefilter("ignore", AstropyWarning)
             ccd = CCDData.read(filename, hdu=1, unit=u.electron)
             plot_image(ccd.data.T)
+
+
+def fits2array(hdu):
+    """Extracts a FITS file data into arrays.
+
+    This function works for spectra only, not imaging, and
+    returns the wavelength calibrated spectrum.
+
+    Parameters
+    ----------
+    hdu: ~fits.hdu
+        Header Data Unit.
+
+    Returns
+    -------
+    wave: array
+        Wavelengths of a spectrum.
+    flux: array
+        Flux density of a spectrum.
+    bkg: array
+        Background of a spectrum.
+    err: array
+        Flux density error of a spectrum.
+    """
+    flux = hdu[0].data
+    header = hdu[0].header
+
+    # wavelength array calculation
+    start_wave = header['CRVAL1']  # initial wavelength
+    step = header['CD1_1']  # increment per pixel
+
+    w0, n = start_wave, len(flux)
+    w = start_wave + step * n
+    wave = np.linspace(w0, w, n, endpoint=False)
+
+    return wave, flux
