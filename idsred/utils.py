@@ -13,7 +13,7 @@ def collect_data(path=None):
 
     if path is None:
         config = dotenv_values(".env")
-        path = config['WORKDIR']
+        path = config["WORKDIR"]
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
@@ -24,8 +24,7 @@ def collect_data(path=None):
 
 def update_header(hdu, new_header):
     header = hdu[0].header
-    skip_keywords = ['SIMPLE', 'BITPIX', 'NAXIS',
-                     'NAXIS1', 'NAXIS2', 'EXTEND']
+    skip_keywords = ["SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "EXTEND"]
 
     for content in new_header.cards:
         keyword = content[0]
@@ -35,14 +34,14 @@ def update_header(hdu, new_header):
 
 def plot_image(hdu):
     """Plots a 2D image.
-    
+
     Parameters
     ----------
     Parameters
     ----------
     hdu: ~fits.hdu
         Header Data Unit.
-        
+
     Returns
     -------
     ax: `~.axes.Axes`
@@ -56,25 +55,32 @@ def plot_image(hdu):
     m, s = np.nanmean(data), np.nanstd(data)
 
     fig, ax = plt.subplots(figsize=(8, 8))
-    im = ax.imshow(data, interpolation='nearest',
-               cmap='gray',
-               vmin=m-s, vmax=m+s,
-               origin='lower')
+    im = ax.imshow(
+        data,
+        interpolation="nearest",
+        cmap="gray",
+        vmin=m - s,
+        vmax=m + s,
+        origin="lower",
+    )
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    ax.set_title(header['OBJECT'], fontsize=16)
+    ax.set_title(header["OBJECT"], fontsize=16)
     return ax
+
 
 def obs_plots(observations, obstype):
     """Plots all images of a given ``obstype``.
-    
+
     Parameters
     ----------
     observations: `~ImageFileCollection`
         Table-like object with images information.
     obstype: str
         Type of Image. E.g. ``BIAS``, ``FLAT``.
-    """    
-    for filename in observations.files_filtered(include_path=True, obstype=obstype):
+    """
+    for filename in observations.files_filtered(
+        include_path=True, obstype=obstype
+    ):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", AstropyWarning)
             ccd = CCDData.read(filename, hdu=1, unit=u.electron)
@@ -107,8 +113,8 @@ def fits2array(hdu):
     header = hdu[0].header
 
     # wavelength array calculation
-    start_wave = header['CRVAL1']  # initial wavelength
-    step = header['CD1_1']  # increment per pixel
+    start_wave = header["CRVAL1"]  # initial wavelength
+    step = header["CD1_1"]  # increment per pixel
 
     w0, n = start_wave, len(flux)
     w = start_wave + step * n
