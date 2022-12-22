@@ -1,5 +1,7 @@
 # IDSRED: INT-IDS data-reduction pipeline
 
+This is a spectroscopic data-reduction pipeline for the Isaac Newton Telescope (INT) Intermediate Dispersion Spectrograph (IDS) instrument. 
+It is optimised for the blue detector (EEV10).
 
 ## Installation
 
@@ -10,31 +12,29 @@ conda create -n idsred pip
 conda activate idsred
 ```
 
-and install it using pip:
+and install it using pip (NOT AVAILABLE YET):
 
 ```code
 pip install "idsred"
 ```
 
-To install it in developer mode, use:
+or from source:
 
 ```code
-pip install -e ".[dev]"
+git clone https://github.com/temuller/idsred.git
+cd idsred
+pip install .
 ```
 
-## Test
-
-A simple test can be run with:
+Developer mode:
 
 ```code
-run test
+pip install -e .
 ```
 
-or for developers:
+## Contributing
 
-```code
-pytest
-```
+To contribute, either open an issue or send a pull request (preferred option). You can also contact me directly.
 
 ## Acknowledgement
 
