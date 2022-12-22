@@ -606,7 +606,8 @@ def find_wavesol(func='chebyshev', coefs=None, k=5, niter=5, sigclip=2.5, plot_s
         Either ``chebyshev`` or ``legendre``.
     coefs: array-like, default ``None``
         Initial guess for the parameters for the
-        wavelength-solution function.
+        wavelength-solution function. Tuple, e.g. (4500, 0.5, 0, 0).
+        If this is given, it overwrites the degrees of the polynomial.
     k: int, default ``5``
         Degree of the polynomial.
     niter: int, default ``5``
