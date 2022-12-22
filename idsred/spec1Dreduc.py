@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 from dotenv import dotenv_values
 
 from ccdproc import CCDData
+from astropy.io import fits
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 from astropy.stats import sigma_clip
@@ -115,7 +116,7 @@ def get_profile_chisq(params, ys, profile):
     
     return np.sum( (profile - model)**2 / (profile.size - len(params)))
 
-def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width=40, plot_diag=False, plot_trace=False):
+def optimised_trace(hdu, center=None, amp=None, hwidth=50, t_order=3, sky_width=40, plot_diag=False, plot_trace=False):
     """Extracts a "raw" spectrum in an optimised way.
     
     The trace is background subtracted. Sigma clipping is used for removing "untrusted" fits.
@@ -146,6 +147,8 @@ def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width
     raw_spectrum: array
         Raw spectrum of the image.
     """
+    data = hdu[0].data
+    header = hdu[0].header
     
     ny, nx = data.shape
     xs = np.arange(nx)
@@ -262,15 +265,15 @@ def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width
         plt.show()
     
     if plot_trace:
-        _data = np.copy(data)
+        #_data = np.copy(data)
         for i in range(2):
-            ymax, xmax = _data.shape
+            ymax, xmax = data.shape
             ymin, xmin = 0, 0
             if i==1:
                  # zoom in the centre
                 xmin, xmax = 1900, 2100
                
-            ax = plot_image(_data)
+            ax = plot_image(hdu)
             ax.plot(xs, trace_top, c='r', lw=1, label='aperture')
             ax.plot(xs, trace_bottom, c='r')
             ax.fill_between(xs, sky_top, sky_top+sky_width, color='g', alpha=0.4, label='sky')
@@ -282,11 +285,6 @@ def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width
         plt.show() 
         
     raw_spectrum = np.zeros_like(trace)
-    try:
-        data = data.data # avoid using masked array
-    except:
-        pass
-    
     for i in xs:
         # sky with a fixed width
         imin = int(sky_bottom[i]-sky_width)
@@ -323,6 +321,7 @@ def optimised_trace(data, center=None, amp=None, hwidth=50, t_order=3, sky_width
         ax.plot(raw_spectrum)
         ax.set_xlabel('Dispersion axis (pixels)', fontsize=16)
         ax.set_ylabel('Raw Flux', fontsize=16)
+        ax.set_title(header['OBJECT'], fontsize=16)
         plt.show()
     
     return raw_spectrum
@@ -337,12 +336,18 @@ def quick_1Dreduction(plot_diag=False, plot_trace=False):
     for file in files:
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", AstropyWarning)
-            image = CCDData.read(file)
+            hdu = fits.open(file)
+            header = hdu[0].header
 
         # extract trace
-        raw_spectrum = optimised_trace(image, plot_diag=plot_diag, plot_trace=plot_trace)
-        image.data = raw_spectrum
+        raw_spectrum = optimised_trace(hdu, plot_diag=plot_diag, plot_trace=plot_trace)
+        hdu[0].data = raw_spectrum
+        # update header
+        header['NAXIS'] = 1
+        header['NAXIS2'] = len(raw_spectrum)
+        del header['NAXIS2']
+
 
         object_name = os.path.basename(file).split('_')[0]
         outfile = os.path.join(PROCESSING, f'{object_name}_1d.fits')
-        image.write(outfile, overwrite=True)
+        hdu.writeto(outfile, overwrite=True)

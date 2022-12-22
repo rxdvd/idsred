@@ -22,19 +22,37 @@ def collect_data(path=None):
     return observations
 
 
-def plot_image(data):
+def update_header(hdu, new_header):
+    header = hdu[0].header
+    skip_keywords = ['SIMPLE', 'BITPIX', 'NAXIS',
+                     'NAXIS1', 'NAXIS2', 'EXTEND']
+
+    for content in new_header.cards:
+        keyword = content[0]
+        if keyword not in skip_keywords:
+            header.append(content)
+
+
+def plot_image(hdu):
     """Plots a 2D image.
     
     Parameters
     ----------
-    data: ndarray
-        Image data.
+    Parameters
+    ----------
+    hdu: ~fits.hdu
+        Header Data Unit.
         
     Returns
     -------
     ax: `~.axes.Axes`
         Plot axis.
     """
+    data = hdu[0].data
+    header = hdu[0].header
+    if data is None:
+        data = hdu[1].data
+
     m, s = np.nanmean(data), np.nanstd(data)
 
     fig, ax = plt.subplots(figsize=(8, 8))
@@ -42,7 +60,8 @@ def plot_image(data):
                cmap='gray',
                vmin=m-s, vmax=m+s,
                origin='lower')
-    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)    
+    fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    ax.set_title(header['OBJECT'], fontsize=16)
     return ax
 
 def obs_plots(observations, obstype):

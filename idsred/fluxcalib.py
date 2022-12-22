@@ -187,6 +187,7 @@ def fit_sensfunc(std_name=None, fmask=True, degree=5, xmin=None, xmax=None, plot
         fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
         ax[0].plot(cal_wave, raw_flux / raw_flux.max(), label='Obs. Spec.')
         ax[0].plot(cal_wave, interp_calflux / interp_calflux.max(), label='Cal. Spec.')
+        ax[0].set_title(std_name, fontsize=16)
         ax[0].legend(fontsize=14)
 
     # sensitivity function calculation starts here

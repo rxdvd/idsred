@@ -9,7 +9,7 @@ from astropy.stats import mad_std
 import ccdproc
 from ccdproc import CCDData
 
-from .utils import collect_data
+from .utils import collect_data, update_header
 
 import warnings
 from astropy.utils.exceptions import AstropyWarning
@@ -311,10 +311,13 @@ def reduce_images(observations, master_bias=None, master_flat=None, subtract_ove
         print("Reducing:", object_name)
         target_list = []
         
-        for filename in observations.files_filtered(include_path=True, object=object_name):
+        for i, filename in enumerate(observations.files_filtered(include_path=True, object=object_name)):
             hdu = fits.open(filename)
             print(filename)
             header = hdu[0].header+hdu[1].header
+            if i==0:
+                # for the output
+                master_header = header
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", AstropyWarning)
                 ccd = CCDData(hdu[1].data, header=header, unit=u.adu)
@@ -351,7 +354,9 @@ def reduce_images(observations, master_bias=None, master_flat=None, subtract_ove
                 red_target = combiner.average_combine()
             else:
                 red_target = combiner.median_combine()
-            red_images.append(red_target)
+
+            red_hdu = red_target.to_hdu()
+            update_header(red_hdu, master_header)
             
             if save_output:
                 config = dotenv_values(".env")
@@ -359,7 +364,9 @@ def reduce_images(observations, master_bias=None, master_flat=None, subtract_ove
                 outfile = os.path.join(PROCESSING, f'{object_name}_2d.fits')
                 if not os.path.isdir(PROCESSING):
                     os.mkdir(PROCESSING)
-                red_target.write(outfile, overwrite=True)
+                red_hdu.writeto(outfile, overwrite=True)
+
+            red_images.append(red_hdu)
         
     return red_images
 
