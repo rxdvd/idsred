@@ -32,6 +32,10 @@ Developer mode:
 pip install -e .
 ```
 
+## Usage example
+
+A notebook that explains how to use the pipeline is found in this repository [here](https://github.com/temuller/idsred/blob/main/reduction.ipynb).
+
 ## Contributing
 
 To contribute, either open an issue or send a pull request (preferred option). You can also contact me directly.
