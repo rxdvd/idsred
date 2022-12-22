@@ -359,8 +359,6 @@ def quick_wavelength_solution(arc_pixels, lamp_wave, params=None, sigmas=None, f
 
     Parameters
     ----------
-    params: array-like
-        Parameters for the wavelength-solution function.
     arc_pixels: array
         Dispersion axis in pixels.
     lamp_wave: array
@@ -368,9 +366,19 @@ def quick_wavelength_solution(arc_pixels, lamp_wave, params=None, sigmas=None, f
     params: array-like, default ``None``
         Initial guess for the parameters for the
         wavelength-solution function.
-    arc_sigmas: array, default ``None``
+    sigmas: array, default ``None``
         Sigmas used for ``find_nearest``.
-
+    func: str, default ``chebyshev``
+        Polynomial used to fit the wavelength solution.
+        Either ``chebyshev`` or ``legendre``.
+    k: int, default ``3``
+        Degree of the polynomial.
+    niter: int, default ``3``
+        Number of iteration for the fit. Values are sigma clipped.
+    sigclip: float, default ``2.5``
+        Threshold for the sigma clipping.
+    plot_solution: bool, default ``False``
+        If ``True``, the solution is plotted.
     data: `~astropy.nddata.CCDData`-like, array-like
         Image data for plotting purposes only.
 
@@ -586,7 +594,28 @@ def check_solution(params, arc_pixels, lamp_wave, mask=None, data=None, func='le
     print(f'Residual mean: {mean:.1f} +/- {std:.1f} angstroms')
 
 
-def find_wavesol(func='chebyshev', k=5, niter=5, sigclip=2.5, plot_solution=False):
+def find_wavesol(func='chebyshev', coefs=None, k=5, niter=5, sigclip=2.5, plot_solution=False):
+    """Finds the wavelength solution.
+
+    The master ARC file is used for this.
+
+    Parameters
+    ----------
+    func: str, default ``chebyshev``
+        Polynomial used to fit the wavelength solution.
+        Either ``chebyshev`` or ``legendre``.
+    coefs: array-like, default ``None``
+        Initial guess for the parameters for the
+        wavelength-solution function.
+    k: int, default ``5``
+        Degree of the polynomial.
+    niter: int, default ``5``
+        Number of iteration for the fit. Values are sigma clipped.
+    sigclip: float, default ``2.5``
+        Threshold for the sigma clipping.
+    plot_solution: bool, default ``False``
+        If ``True``, the solution is plotted.
+    """
     # load master ARC file
     config = dotenv_values(".env")
     PROCESSING = config['PROCESSING']
@@ -604,7 +633,8 @@ def find_wavesol(func='chebyshev', k=5, niter=5, sigclip=2.5, plot_solution=Fals
     global idsred_path
     lamp_file = os.path.join(idsred_path, 'lamps/CuArNe_high.dat')
     lamp_wave = np.loadtxt(lamp_file).T
-    quick_wavelength_solution(arc_pixels, lamp_wave, None, None, func=func,
+    sigmas = None  # no uncertainty in the peaks found
+    quick_wavelength_solution(arc_pixels, lamp_wave, coefs, sigmas, func=func,
                                niter=niter, sigclip=sigclip, k=k,
                                plot_solution=plot_solution, data=data)
 
