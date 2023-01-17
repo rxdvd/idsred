@@ -9,6 +9,11 @@ from astropy.io import fits
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 from astropy.stats import sigma_clip
+from astropy.convolution import (
+    Box2DKernel,
+    convolve_fft,
+    interpolate_replace_nans,
+)
 
 from .utils import plot_image
 
@@ -107,7 +112,7 @@ def get_profile_model(params, ys):
     amplitude, center, sigma, yoffset = params
 
     profile = np.exp(-((ys - center) ** 2) / 2 / sigma**2)
-    profile /= profile.max()
+    profile /= np.nanmax(profile)
     profile *= amplitude
     profile += yoffset
 
@@ -127,7 +132,6 @@ def optimised_trace(
     amp=None,
     hwidth=50,
     t_order=3,
-    sky_width=40,
     plot_diag=False,
     plot_trace=False,
 ):
@@ -149,8 +153,6 @@ def optimised_trace(
         Number of pixels to used for each bin in the dispersion axis.
     t_order: int, default ``3``
         Order of the polynomial used for fitting the trace.
-    sky_width: float, default ``40``
-        Width of the sky in pixels. Used for background subtraction.
     plot_diag: bool, default ``False``
         If ``True``, a set of diagnostic plots are shown for each step and the final solution as well.
     plot_trace: bool, default ``False``
@@ -171,14 +173,12 @@ def optimised_trace(
     cols = np.arange(hwidth, nx + 1, 2 * hwidth)
     ycenter = np.zeros(len(cols))
     ywidth = np.zeros(len(cols))
-    init_sky = np.zeros(len(cols))
 
     for icol, col in enumerate(cols):
         if col < 500 or col > 3500:
             # avoid edges as there is no signal
             ycenter[icol] = np.inf
             ywidth[icol] = np.inf
-            init_sky[icol] = np.inf
             continue
 
         stamp = data[:, col - hwidth : col + hwidth]
@@ -207,7 +207,6 @@ def optimised_trace(
         if params[2] < 20:
             ycenter[icol] = params[1]
             ywidth[icol] = 4 * params[2]  # aperture width of 4 sigmas
-            init_sky[icol] = 6 * params[2]  # sky starts at 6 sigmas
             model = get_profile_model(params, ys)
 
             # diagnostic plots for each step
@@ -222,19 +221,6 @@ def optimised_trace(
                     label="aperture",
                 )
                 ax.axvline(ycenter[icol] - ywidth[icol], c="r", ls="dotted")
-                ax.axvspan(
-                    ycenter[icol] + init_sky[icol],
-                    ycenter[icol] + init_sky[icol] + 20,
-                    alpha=0.3,
-                    color="red",
-                    label="sky",
-                )
-                ax.axvspan(
-                    ycenter[icol] - init_sky[icol],
-                    ycenter[icol] - init_sky[icol] - 20,
-                    alpha=0.3,
-                    color="red",
-                )
                 ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
                 ax.set_ylabel("Median Counts", fontsize=16)
                 ax.legend()
@@ -243,34 +229,27 @@ def optimised_trace(
         else:
             ycenter[icol] = np.inf
             ywidth[icol] = np.inf
-            init_sky[icol] = np.inf
 
     # remove bad fits
     mask = np.isfinite(ycenter)
     ycenter = ycenter[mask]
     ywidth = ywidth[mask]
-    init_sky = init_sky[mask]
     cols = cols[mask]
 
     # remove untrusted fits with sigma clipping
     mask = ~sigma_clip(ycenter, sigma=2.5, maxiters=10).mask
     ycenter = ycenter[mask]
     ywidth = ywidth[mask]
-    init_sky = init_sky[mask]
     cols = cols[mask]
 
     trace_coef = np.polyfit(cols, ycenter, t_order)
     trace = np.polyval(trace_coef, xs)
 
+    # trace aperture
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
-        # trace aperture
         trace_top = trace + np.median(ywidth)
         trace_bottom = trace - np.median(ywidth)
-
-        # sky
-        sky_top = trace + np.median(init_sky)
-        sky_bottom = trace - np.median(init_sky)
 
     # final diagnostic plots
     if plot_diag:
@@ -306,51 +285,34 @@ def optimised_trace(
             ax = plot_image(hdu)
             ax.plot(xs, trace_top, c="r", lw=1, label="aperture")
             ax.plot(xs, trace_bottom, c="r")
-            ax.fill_between(
-                xs,
-                sky_top,
-                sky_top + sky_width,
-                color="g",
-                alpha=0.4,
-                label="sky",
-            )
-            ax.fill_between(
-                xs, sky_bottom, sky_bottom - sky_width, color="g", alpha=0.4
-            )
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
 
         ax.legend(fontsize=16)
         plt.show()
 
-    raw_spectrum = np.zeros_like(trace)
+    # for the background
+    masked_data = data.copy()
     for i in xs:
-        # sky with a fixed width
-        imin = int(sky_bottom[i] - sky_width)
-        imax = int(sky_bottom[i])
-        if len(data[imin:imax, i]) == 0:
-            sky1 = 0
-        else:
-            sky1 = np.nanmean(data[imin:imax, i])
-
-        imin = int(sky_top[i])
-        imax = int(sky_top[i] + sky_width)
-        if len(data[imin:imax, i]) == 0:
-            sky2 = 0
-        else:
-            sky2 = np.nanmean(data[imin:imax, i])
-
-        # take the average sky of both sides
-        sky = np.mean(sky1 + sky2)
-
         imin = int(trace_bottom[i])
         imax = int(trace_top[i])
-        # with background subtraction + sigma clipping
-        slice_data = data[imin:imax, i]
+        masked_data[imin:imax, i] = np.nan
+
+    # model the background and subtract it
+    kernel = Box2DKernel(100)
+    conv_data = interpolate_replace_nans(masked_data, kernel, convolve_fft)
+    sub_data = data - conv_data  # background-subtracted data
+    sub_data[sub_data < 0] = 0  # avoid negative flux
+
+    raw_spectrum = np.zeros_like(trace)
+    for i in xs:
+        imin = int(trace_bottom[i])
+        imax = int(trace_top[i])
+        slice_data = sub_data[imin:imax, i]
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             mask = ~sigma_clip(slice_data, maxiters=10).mask
-            raw_spectrum[i] = np.nansum(slice_data[mask]) - sky
+            raw_spectrum[i] = np.nansum(slice_data[mask])
 
     # the axis is inverted
     raw_spectrum = raw_spectrum[::-1]

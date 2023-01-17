@@ -177,6 +177,7 @@ def create_master_bias(
         observations, obstype, subtract_overscan, trim_image
     )
     master_bias = combine_images(bias_list, method)
+    master_bias.header['OBJECT'] = 'MASTER_BIAS'
     print(f"{len(bias_list)} images combined for the master BIAS")
 
     if save_output:
@@ -189,6 +190,26 @@ def create_master_bias(
 
     return master_bias
 
+
+def correct_flat(flat):
+    """Filters out the strong and general wavelength dependence of
+    CCD’s sensitivity and spectrograph+telescope+response.
+
+    Parameters
+    ----------
+    flat: array
+        Combined flats.
+
+    Retunrs
+    -------
+    master_flat: array
+        Corrected master flat.
+    """
+    avcol_in = np.average(flat[:, 30:306].copy(), axis=1)  # average column value, avoiding edges
+    avcol_out = np.concatenate([[avcol_in]] * flat.shape[1], axis=0).T
+    master_flat = np.copy(flat / avcol_out)
+
+    return master_flat
 
 def create_master_flat(
     observations,
@@ -237,7 +258,10 @@ def create_master_flat(
         observations, obstype, subtract_overscan, trim_image, master_bias
     )
     master_flat = combine_images(flat_list, method, scale=scale)
+    master_flat.header['OBJECT'] = 'MASTER_FLAT'
     print(f"{len(flat_list)} images combined for the master FLAT")
+
+    master_flat.data = correct_flat(master_flat)
 
     if save_output:
         config = dotenv_values(".env")
@@ -306,6 +330,7 @@ def create_master_arc(
         arc_observations, obstype, subtract_overscan=False, trim_image=False
     )
     master_arc = combine_images(arc_list, method)
+    master_arc.header['OBJECT'] = 'MASTER_ARC'
     print(f"{len(arc_list)} images combined for the master ARC")
 
     if save_output:
