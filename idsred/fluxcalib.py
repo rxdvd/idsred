@@ -163,21 +163,75 @@ def get_standard(std_name, fmask=True):
         cal_wave = cal_wave[mask]
         raw_flux = raw_flux[mask]
 
-    return cal_wave, raw_flux
+    return cal_wave, raw_flux, hdu
 
+
+def calc_airmass(hdu):
+    """Calculates the airmass for a given target.
+
+    The zenith es calculated as the average of
+    ZDSTART and ZDEND. The airmass is the secant
+    of zenit: X = sec(z).
+
+    Parameters
+    ----------
+    hdu: ~fits.hdu
+        Header Data Unit.
+
+    Returns
+    -------
+    airmass: float
+        Target's airmass.
+    """
+    zenith = (hdu[0].header['ZDSTART'] + hdu[0].header['ZDEND']) / 2
+    zenith_rad = zenith * np.pi / 180
+    airmass = 1 / np.cos(zenith_rad)
+
+    return airmass
+
+
+def correct_extinction(wave, flux, airmass):
+    """Corrects a spectrum for atmospheric extinction.
+
+    Parameters
+    ----------
+    wave: array
+        Target's wavelength.
+    flux: array
+        Target's flux.
+    airmass: float
+        Target's airmass.
+
+    Returns
+    -------
+    corr_flux: array
+        Extinction-corrected flux.
+    """
+    ext_path = os.path.join(idsred.__path__[0], 'extinction/lapalmaext.txt')
+    _wave, _ext_mag = np.loadtxt(ext_path).T  # _ext_mag in units of mag/airmass
+
+    _ext = 10 ** (_ext_mag * airmass)
+    _ext = np.interp(wave, _wave, _ext)
+
+    corr_flux = flux * _ext
+
+    return corr_flux
 
 def fit_sensfunc(
     std_name=None, fmask=True, degree=5, xmin=None, xmax=None, plot_diag=False
 ):
+    config = dotenv_values(".env")
+    PROCESSING = config["PROCESSING"]
 
     if std_name is None:
-        config = dotenv_values(".env")
-        PROCESSING = config["PROCESSING"]
         std_files = os.path.join(PROCESSING, "*_1d.fits")
         basename = os.path.basename(glob.glob(std_files)[0])
         std_name = basename.split("_")[0]
 
-    cal_wave, raw_flux = get_standard(std_name, fmask)  # observed standard
+    cal_wave, raw_flux, std_hdu = get_standard(std_name, fmask)  # observed standard
+    airmass = calc_airmass(std_hdu)
+    raw_flux = correct_extinction(cal_wave, raw_flux, airmass)
+
     calspec = get_calspec(std_name)  # catalog/calibrated standard
     interp_calflux = np.interp(
         cal_wave, calspec.wave.values, calspec.flux.values
@@ -213,6 +267,16 @@ def fit_sensfunc(
     coefs = np.polyfit(cal_wave, log_ratio, degree)
     log_sensfunc = np.polyval(coefs, cal_wave)
     sensfunc = 10**log_sensfunc
+
+    # calculate telluric correction
+    tellurics = sensfunc / flux_ratio
+    mask = (cal_wave > 7500) & (cal_wave < 7800)
+    tellurics[~mask] = 1
+    tellurics[tellurics > 1] = 1
+
+    tellurics_file = os.path.join(PROCESSING,
+                                     "telluric_correction.txt")
+    np.savetxt(tellurics_file, np.array([cal_wave, tellurics]).T)
 
     if plot_diag:
         ax[1].plot(
@@ -295,6 +359,19 @@ def apply_sensfunc(wavelength, raw_flux):
 
     return wavelength, flux
 
+def correct_tellurics(wavelength, flux):
+    """Corrects for telluric absorptions.
+
+    """
+    config = dotenv_values(".env")
+    PROCESSING = config["PROCESSING"]
+    tellurics_file = os.path.join(PROCESSING, "telluric_correction.txt")
+    tell_wave, tellurics = np.loadtxt(tellurics_file).T
+
+    tellurics = np.interp(wavelength, tell_wave, tellurics)
+    corr_flux = flux*tellurics
+
+    return corr_flux
 
 def calibrate_spectra():
     config = dotenv_values(".env")
@@ -309,9 +386,10 @@ def calibrate_spectra():
         raw_flux = hdu[0].data
         raw_wave = np.arange(len(raw_flux))
 
-        # apply wavelength and flux calibration
+        # apply wavelength and flux calibration + telluric correction
         cal_wave = apply_wavesol(raw_wave)
         cal_wave, cal_flux = apply_sensfunc(cal_wave, raw_flux)
+        cal_flux = correct_tellurics(cal_wave, cal_flux)
         hdu[0].data = cal_flux
         header["CRVAL1"] = cal_wave.min()  # initial wavelength
         wave_diff = np.diff(cal_wave)
@@ -320,55 +398,3 @@ def calibrate_spectra():
         # save calibrated spectrum
         outfile = file.replace("_1d", "_wf")
         hdu.writeto(outfile, overwrite=True)
-
-
-def fit_calspec_continuum(calspec, window=None, plot=False):
-    spectrum = Spectrum1D(
-        flux=calspec["flux"].values * u.erg,
-        spectral_axis=calspec["wave"].values * u.angstrom,
-    )
-
-    with warnings.catch_warnings():
-        warnings.simplefilter("ignore")
-        cs_fit = fit_continuum(spectrum, window=window)
-
-    # for plotting purposes only
-    continuum_fit = cs_fit(calspec["wave"].values * u.angstrom)
-
-    if plot:
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        ax.plot(calspec["wave"], calspec["flux"], lw=2)
-        ax.plot(calspec["wave"], continuum_fit, lw=2, label="Continuum fit")
-        ax.set_xlabel("Wavelength ($\AA$)", fontsize=16)
-        ax.set_ylabel(r"$F_{\lambda}$", fontsize=16)
-        ax.legend(fontsize=14)
-
-        plt.show()
-
-    return cs_fit
-
-
-def fit_sensfunc_OLD(raw_spectrum, params, cs_fit, plot=False):
-    # ratio between observed standard and the continuum of the "archive" standard
-    raw_wave = np.arange(len(raw_spectrum))
-    cal_wave = wavelength_function(params, raw_wave)
-    ratio = raw_spectrum / cs_fit(cal_wave * u.angstrom)
-    log_ratio = np.log10(np.abs(ratio.value))
-
-    # fit with spline
-    mask = (3800 < cal_wave) & (cal_wave < 9000)
-    sensfunc = UnivariateSpline(cal_wave[mask], log_ratio[mask], k=4)
-
-    if plot:
-        fig, ax = plt.subplots(figsize=(8, 6))
-
-        plt.plot(cal_wave, ratio, lw=2, label="Ratio")
-        plt.plot(cal_wave, 10 ** sensfunc(cal_wave), lw=2, label="Fit")
-        ax.set_ylabel("Sensitivity function", fontsize=16)
-        ax.set_xlabel(r"Wavelength ($\AA$)", fontsize=16)
-        ax.legend(fontsize=14)
-
-        plt.show()
-
-    return sensfunc
