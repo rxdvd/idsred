@@ -64,8 +64,8 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
 
         guess = (amplitude0, center0, sigma, offset)
         bounds = (
-            (0, center0 - 2, 0, -np.inf),
-            (np.inf, center0 + 2, np.inf, np.inf),
+            (0, center0 - 5, 0, -np.inf),
+            (np.inf, center0 + 5, np.inf, np.inf),
         )
 
         # indices to bound the profile of each line
@@ -91,7 +91,7 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
             chi2 = np.sum(residual**2 / sigma**2)
             chi2_red = chi2 / (len(y_mod) - len(popt))
 
-            if np.abs(center - center0) > 1:
+            if np.abs(center - center0) > 4:
                 center = np.inf
 
             if chi2_red < 1.0:
@@ -185,7 +185,8 @@ def find_arc_peaks(data, plot_solution=False, plot_diag=False):
     )
 
     # saturation mask / maximum line intensity
-    sat_mask = arc_peaks < 64000
+    #sat_mask = arc_peaks < 64000
+    sat_mask = arc_peaks < 70000
     arc_pixels = arc_pixels[sat_mask]
     arc_peaks = arc_peaks[sat_mask]
     offsets = offsets[sat_mask]
@@ -338,7 +339,6 @@ def chi_sq(
     params,
     arc_pixels,
     lamp_wave,
-    sigmas=None,
     func="chebyshev",
     xmin=None,
     xmax=None,
@@ -359,15 +359,12 @@ def chi_sq(
     chi: float
         Chi squared value.
     """
+    xmin, xmax = 1274.7568, 3699.0979
     model_wave = wavelength_function(params, arc_pixels, func, xmin, xmax)
     ids_lamp, ids_model = find_nearest(lamp_wave, model_wave)
     residual = model_wave[ids_model] - lamp_wave[ids_lamp]
 
-    if sigmas is None:
-        sigmas = np.ones_like(residual)
-    std = sigmas[ids_model]
-
-    chi = np.sum(residual**2 / std**2)
+    chi = np.sum(residual**2)
 
     return chi
 
@@ -386,25 +383,26 @@ def prepare_params(params):
     parameters = Parameters()
     for i, value in enumerate(params):
         if i == 0:
-            min_val, max_val = 0, 10000
+            min_val, max_val = 5000, 8000
+        elif i == 1:
+            min_val, max_val = 1500, 3000
         else:
-            min_val, max_val = -5000, 5000
+            min_val, max_val = -50, 50
         parameters.add(f"c{i}", value=value, min=min_val, max=max_val)
 
     return parameters
 
 
 def quick_wavelength_solution(
-    arc_pixels,
-    lamp_wave,
-    params=None,
-    sigmas=None,
-    func="chebyshev",
-    k=3,
-    niter=3,
-    sigclip=2.5,
-    plot_solution=False,
-    data=None,
+        arc_pixels,
+        lamp_wave,
+        func="legendre",
+        k=3,
+        params=None,
+        niter=3,
+        sigclip=3,
+        plot_solution=False,
+        data=None,
 ):
     """Finds a wavelength solution with a simple fit.
 
@@ -414,19 +412,17 @@ def quick_wavelength_solution(
         Dispersion axis in pixels.
     lamp_wave: array
         Wavelengths of a lamp.
-    params: array-like, default ``None``
-        Initial guess for the parameters for the
-        wavelength-solution function.
-    sigmas: array, default ``None``
-        Sigmas used for ``find_nearest``.
-    func: str, default ``chebyshev``
+    func: str, default ``legendre``
         Polynomial used to fit the wavelength solution.
         Either ``chebyshev`` or ``legendre``.
     k: int, default ``3``
         Degree of the polynomial.
+    params: array-like, default ``None``
+        Initial guess for the parameters for the
+        wavelength-solution function.
     niter: int, default ``3``
         Number of iteration for the fit. Values are sigma clipped.
-    sigclip: float, default ``2.5``
+    sigclip: float, default ``3``
         Threshold for the sigma clipping.
     plot_solution: bool, default ``False``
         If ``True``, the solution is plotted.
@@ -439,26 +435,40 @@ def quick_wavelength_solution(
         Parameters for the wavelength-solution function.
     """
     if params is None:
-        params = [6900, 2100] + (k - 1) * [0]
+        params = [6848.45334, 2267.76127] + (k - 1) * [0]
+    method = 'nelder'  # for minimisation with lmfit
 
     arc_pixels0 = np.copy(arc_pixels)
-    xmin, xmax = arc_pixels0.min(), arc_pixels0.max()
-    if sigmas is not None:
-        sigmas0 = np.copy(sigmas)
-    else:
-        sigmas0 = None
+    # xmin, xmax = arc_pixels0.min(), arc_pixels0.max()
+    xmin, xmax = 1274.7568, 3699.0979
 
+    # identify manually
+    pixels = np.array([1712, 1955, 2048, 2213, 2304, 2530])
+    waves = np.array([5400.2, 5852.5, 6030, 6334.4, 6506.5, 6929.5])
+    init_pixels = np.zeros_like(pixels)
+    for i, pix in enumerate(pixels):
+        ids_lamp, _ = find_nearest(arc_pixels, np.array([pix]))
+        init_pixels[i] = arc_pixels[ids_lamp]
+
+    parameters = prepare_params(params)
+    fitter = Minimizer(
+        chi_sq,
+        parameters,
+        fcn_args=(init_pixels, waves, func, xmin, xmax),
+    )
+    result = fitter.minimize(method=method)
+    params = [result.params[key].value for key in result.params]
+
+    # iterate fit with sigma clipping
     if niter > 0:
         for i in range(niter):
-            # results = minimize(chi_sq, params, args=(arc_pixels0, lamp_wave, sigmas0, func, xmin, xmax), method='Powell')
-            # params = results.x
             parameters = prepare_params(params)
             fitter = Minimizer(
                 chi_sq,
                 parameters,
-                fcn_args=(arc_pixels0, lamp_wave, sigmas0, func, xmin, xmax),
+                fcn_args=(arc_pixels0, lamp_wave, func, xmin, xmax),
             )
-            result = fitter.minimize(method="powell")
+            result = fitter.minimize(method=method)
             params = [result.params[key].value for key in result.params]
 
             calibrated_wave = wavelength_function(
@@ -470,18 +480,14 @@ def quick_wavelength_solution(
             # outliers removal
             mask = ~sigma_clip(residuals, sigma=sigclip).mask
             arc_pixels0 = arc_pixels0[ids_calwave][mask]
-            if sigmas0 is not None:
-                sigmas0 = sigmas0[ids_calwave][mask]
 
-    # results = minimize(chi_sq, params, args=(arc_pixels0, lamp_wave, sigmas0, func, xmin, xmax), method='Powell')
-    # params = results.x
     parameters = prepare_params(params)
     fitter = Minimizer(
         chi_sq,
         parameters,
-        fcn_args=(arc_pixels0, lamp_wave, sigmas0, func, xmin, xmax),
+        fcn_args=(arc_pixels0, lamp_wave, func, xmin, xmax),
     )
-    result = fitter.minimize(method="powell")
+    result = fitter.minimize(method=method)
     params = [result.params[key].value for key in result.params]
 
     outliers_mask = np.array(
@@ -495,88 +501,6 @@ def quick_wavelength_solution(
     save_wavesol(func, xmin, xmax, params)
 
     return params
-
-
-# MCMC solution
-
-
-def log_likelihood(params, arc_pixels, lamp_wave, sigmas, func):
-    """Logarithm of the likelihood for the wavelength solution."""
-    xmin, xmax = arc_pixels.min(), arc_pixels0.max()
-    model_wave = wavelength_function(params, arc_pixels, func, xmin, xmax)
-    ids_lamp, ids_model = find_nearest(lamp_wave, model_wave)
-    residual = model_wave[ids_model] - lamp_wave[ids_lamp]
-
-    if sigmas is None:
-        sigmas = np.ones_like(model_wave)
-    std = sigmas[ids_model]
-
-    ll = -0.5 * np.sum(residual**2 / std**2)
-
-    return ll
-
-
-def log_prior(params):
-    """Priors for the fitting."""
-    for i, p in enumerate(params):
-        if i == 0:
-            if 0 < p < 10000:
-                continue
-        elif -10000 < p < 10000:
-            continue
-        else:
-            return -np.inf
-    return 0.0
-
-
-def log_probability(params, arc_pixels, lamp_wave, sigmas, func):
-    """Posterior function."""
-    lp = log_prior(params)
-    if not np.isfinite(lp):
-        return -np.inf
-    return lp + log_likelihood(params, arc_pixels, lamp_wave, sigmas, func)
-
-
-def optimised_wavelength_solution(
-    params,
-    arc_pixels,
-    lamp_wave,
-    sigmas=None,
-    func="legendre",
-    plot_solution=False,
-    data=None,
-):
-
-    pos = params + 1e-2 * np.random.randn(32, len(params))
-    # pos.T[0] += 1e3 * np.random.randn(32)  # the 1st parameter needs more exploring
-    # pos.T[1] += 0.5 * np.abs(np.random.randn(32))
-    nwalkers, ndim = pos.shape
-
-    sampler = emcee.EnsembleSampler(
-        nwalkers,
-        ndim,
-        log_probability,
-        args=(arc_pixels, lamp_wave, sigmas, func),
-    )
-    sampler.run_mcmc(pos, 3000, progress=True)
-    flat_samples = sampler.get_chain(discard=500, thin=50, flat=True)
-
-    # plotting
-    labels = [f"c{i}" for i in range(len(params))]
-    corner.corner(flat_samples, labels=labels)
-    plt.show()
-
-    params = []
-    for i in range(ndim):
-        mcmc = np.percentile(flat_samples[:, i], [16, 50, 84])
-        params.append(mcmc[1])
-
-    if plot_solution:
-        mask = None  # no outliers mask for MCMC
-        check_solution(params, arc_pixels, lamp_wave, mask, data, func)
-
-    return params
-
 
 # Checking output
 
@@ -599,7 +523,8 @@ def check_solution(
     data: `~astropy.nddata.CCDData`-like, array-like
         Image data for plotting purposes only.
     """
-    xmin, xmax = arc_pixels.min(), arc_pixels.max()
+    #xmin, xmax = arc_pixels.min(), arc_pixels.max()
+    xmin, xmax = 1274.7568, 3699.0979
 
     calibrated_wave = wavelength_function(params, arc_pixels, func, xmin, xmax)
     ids_lamp, ids_calwave = find_nearest(lamp_wave, calibrated_wave)
@@ -709,13 +634,15 @@ def check_solution(
     axes[i + 1].set_ylabel(r"Residual ($\AA$)", fontsize=16)
     axes[i + 1].set_xlabel(r"Wavelength ($\AA$)", fontsize=16)
     axes[i + 1].set_ylim(mean - 3 * std, mean + 3 * std)
+
+    axes[0].set_title(f"Residual: {mean:.1f} +/- {std:.2f}"+r" \AA", fontsize=16)
     plt.show()
 
-    print(f"Residual mean: {mean:.1f} +/- {std:.1f} angstroms")
+
 
 
 def find_wavesol(
-    func="chebyshev",
+    func="legendre",
     coefs=None,
     k=5,
     niter=5,
@@ -728,7 +655,7 @@ def find_wavesol(
 
     Parameters
     ----------
-    func: str, default ``chebyshev``
+    func: str, default ``legendre``
         Polynomial used to fit the wavelength solution.
         Either ``chebyshev`` or ``legendre``.
     coefs: array-like, default ``None``
@@ -765,18 +692,16 @@ def find_wavesol(
     )
 
     global idsred_path
-    lamp_file = os.path.join(idsred_path, "lamps/CuArNe_high.dat")
+    lamp_file = os.path.join(idsred_path, "lamps/CuArNe_low.dat")
     lamp_wave = np.loadtxt(lamp_file).T
-    sigmas = None  # no uncertainty in the peaks found
     quick_wavelength_solution(
         arc_pixels,
         lamp_wave,
-        coefs,
-        sigmas,
         func=func,
+        k=k,
+        params=coefs,
         niter=niter,
         sigclip=sigclip,
-        k=k,
         plot_solution=plot_solution,
         data=data,
     )

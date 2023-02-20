@@ -224,15 +224,19 @@ def fit_sensfunc(
     PROCESSING = config["PROCESSING"]
 
     if std_name is None:
+        # choose first standard found
         std_files = os.path.join(PROCESSING, "*_1d.fits")
         basename = os.path.basename(glob.glob(std_files)[0])
         std_name = basename.split("_")[0]
 
-    cal_wave, raw_flux, std_hdu = get_standard(std_name, fmask)  # observed standard
+    # observed standard
+    cal_wave, raw_flux, std_hdu = get_standard(std_name, fmask)
+    # correct for atmospheric extinction at Roque de Los Muchachos observatory
     airmass = calc_airmass(std_hdu)
     raw_flux = correct_extinction(cal_wave, raw_flux, airmass)
 
-    calspec = get_calspec(std_name)  # catalog/calibrated standard
+    # catalog/calibrated standard
+    calspec = get_calspec(std_name)
     interp_calflux = np.interp(
         cal_wave, calspec.wave.values, calspec.flux.values
     )
@@ -270,7 +274,7 @@ def fit_sensfunc(
 
     # calculate telluric correction
     tellurics = sensfunc / flux_ratio
-    mask = (cal_wave > 7500) & (cal_wave < 7800)
+    mask = (cal_wave > 7350) & (cal_wave < 7550)
     tellurics[~mask] = 1
     tellurics[tellurics > 1] = 1
 
@@ -369,7 +373,9 @@ def correct_tellurics(wavelength, flux):
     tell_wave, tellurics = np.loadtxt(tellurics_file).T
 
     tellurics = np.interp(wavelength, tell_wave, tellurics)
-    corr_flux = flux*tellurics
+    #corr_flux = flux*tellurics # to be fixed
+    mask = tellurics<1.0
+    corr_flux = np.interp(wavelength, wavelength[~mask], flux[~mask])
 
     return corr_flux
 
@@ -386,15 +392,24 @@ def calibrate_spectra():
         raw_flux = hdu[0].data
         raw_wave = np.arange(len(raw_flux))
 
-        # apply wavelength and flux calibration + telluric correction
+        # apply wavelength and flux calibration
         cal_wave = apply_wavesol(raw_wave)
         cal_wave, cal_flux = apply_sensfunc(cal_wave, raw_flux)
+
+        # telluric correction
         cal_flux = correct_tellurics(cal_wave, cal_flux)
+
+        # and flux to HDU data and wavelength calibration to header
         hdu[0].data = cal_flux
         header["CRVAL1"] = cal_wave.min()  # initial wavelength
         wave_diff = np.diff(cal_wave)
         header["CD1_1"] = np.mean(wave_diff)  # mean increment per pixel
 
-        # save calibrated spectrum
+        # save calibrated spectrum to fits file...
         outfile = file.replace("_1d", "_wf")
         hdu.writeto(outfile, overwrite=True)
+
+        # ...and save it in an asci file
+        outfile_asci = file.replace("_1d.fits", "_wf.txt")
+        data = np.array([cal_wave, cal_flux]).T
+        np.savetxt(outfile_asci, data)

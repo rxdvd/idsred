@@ -219,6 +219,7 @@ def create_master_flat(
     method="average",
     scale_flats=True,
     save_output=True,
+    corr_flat=True,
 ):
     """Creates a master flat image.
 
@@ -261,7 +262,8 @@ def create_master_flat(
     master_flat.header['OBJECT'] = 'MASTER_FLAT'
     print(f"{len(flat_list)} images combined for the master FLAT")
 
-    master_flat.data = correct_flat(master_flat)
+    if corr_flat is True:
+        master_flat.data = correct_flat(master_flat)
 
     if save_output:
         config = dotenv_values(".env")
@@ -413,7 +415,9 @@ def reduce_images(
             )
 
             try:
-                ccd = ccdproc.cosmicray_lacosmic(ccd, niter=10)
+                ccd = ccdproc.cosmicray_lacosmic(ccd, niter=10,
+                                                 gain=ccd.header["GAIN"],
+                                                 readnoise=ccd.header["READNOIS"])
                 if subtract_overscan:
                     ccd = ccdproc.subtract_overscan(
                         ccd,
@@ -464,6 +468,7 @@ def quick_2Dreduction(
     subtract_overscan=True,
     trim_image=True,
     method="average",
+    corr_flat=True
 ):
 
     if observations is None:
@@ -474,7 +479,7 @@ def quick_2Dreduction(
         observations, subtract_overscan, trim_image, method
     )
     master_flat = create_master_flat(
-        observations, master_bias, subtract_overscan, trim_image, method
+        observations, master_bias, subtract_overscan, trim_image, method, corr_flat=corr_flat
     )
     _ = reduce_images(
         observations,

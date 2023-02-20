@@ -11,6 +11,7 @@ from scipy.signal import find_peaks
 from astropy.stats import sigma_clip
 from astropy.convolution import (
     Box2DKernel,
+    Gaussian2DKernel,
     convolve_fft,
     interpolate_replace_nans,
 )
@@ -173,12 +174,14 @@ def optimised_trace(
     cols = np.arange(hwidth, nx + 1, 2 * hwidth)
     ycenter = np.zeros(len(cols))
     ywidth = np.zeros(len(cols))
+    bkg_width = np.zeros(len(cols))
 
     for icol, col in enumerate(cols):
         if col < 500 or col > 3500:
             # avoid edges as there is no signal
             ycenter[icol] = np.inf
             ywidth[icol] = np.inf
+            bkg_width[icol] = np.inf
             continue
 
         stamp = data[:, col - hwidth : col + hwidth]
@@ -207,6 +210,7 @@ def optimised_trace(
         if params[2] < 20:
             ycenter[icol] = params[1]
             ywidth[icol] = 4 * params[2]  # aperture width of 4 sigmas
+            bkg_width[icol] = 6 * params[2]  # bkg starts at 6 sigmas
             model = get_profile_model(params, ys)
 
             # diagnostic plots for each step
@@ -214,13 +218,12 @@ def optimised_trace(
                 fig, ax = plt.subplots(figsize=(12, 6))
                 ax.plot(ys, profile, label="data")
                 ax.plot(ys, model, label="model")
-                ax.axvline(
-                    ycenter[icol] + ywidth[icol],
-                    c="r",
-                    ls="dotted",
-                    label="aperture",
-                )
+                ax.axvline(ycenter[icol] + ywidth[icol], c="r", ls="dotted",
+                    label="aperture")
                 ax.axvline(ycenter[icol] - ywidth[icol], c="r", ls="dotted")
+                ax.axvline(ycenter[icol] + bkg_width[icol], c="g", ls="dotted",
+                           label="background")
+                ax.axvline(ycenter[icol] - bkg_width[icol], c="g", ls="dotted")
                 ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
                 ax.set_ylabel("Median Counts", fontsize=16)
                 ax.legend()
@@ -234,22 +237,26 @@ def optimised_trace(
     mask = np.isfinite(ycenter)
     ycenter = ycenter[mask]
     ywidth = ywidth[mask]
+    bkg_width = bkg_width[mask]
     cols = cols[mask]
 
     # remove untrusted fits with sigma clipping
     mask = ~sigma_clip(ycenter, sigma=2.5, maxiters=10).mask
     ycenter = ycenter[mask]
     ywidth = ywidth[mask]
+    bkg_width = bkg_width[mask]
     cols = cols[mask]
 
     trace_coef = np.polyfit(cols, ycenter, t_order)
     trace = np.polyval(trace_coef, xs)
 
-    # trace aperture
+    # trace aperture + background
     with warnings.catch_warnings():
         warnings.simplefilter("ignore", UserWarning)
         trace_top = trace + np.median(ywidth)
         trace_bottom = trace - np.median(ywidth)
+        bkg_top = trace + np.median(bkg_width)
+        bkg_bottom = trace - np.median(bkg_width)
 
     # final diagnostic plots
     if plot_diag:
@@ -259,6 +266,8 @@ def optimised_trace(
         ax[0].plot(xs, trace, "r", label="spline")
         ax[0].plot(xs, trace_top, "r", ls="--", label="aperture")
         ax[0].plot(xs, trace_bottom, "r", ls="--")
+        ax[0].plot(xs, bkg_top, "g", ls="--", label="background")
+        ax[0].plot(xs, bkg_bottom, "g", ls="--")
         ax[0].set_title("Trace", fontsize=16)
         ax[0].axes.set_ylabel("y-coordinate", fontsize=16)
         ax[0].legend()
@@ -274,41 +283,56 @@ def optimised_trace(
         plt.show()
 
     if plot_trace:
-        # _data = np.copy(data)
         for i in range(2):
             ymax, xmax = data.shape
             ymin, xmin = 0, 0
             if i == 1:
                 # zoom in the centre
-                xmin, xmax = 1900, 2100
+                xmin, xmax = 1700, 2300
 
             ax = plot_image(hdu)
             ax.plot(xs, trace_top, c="r", lw=1, label="aperture")
             ax.plot(xs, trace_bottom, c="r")
+            ax.plot(xs, bkg_top, c="g", lw=1, label="background")
+            ax.plot(xs, bkg_bottom, c="g")
             ax.set_xlim(xmin, xmax)
             ax.set_ylim(ymin, ymax)
 
         ax.legend(fontsize=16)
         plt.show()
 
-    # for the background
+    # for the background convolution
+    # starts exactly where the aperture ends
     masked_data = data.copy()
     for i in xs:
         imin = int(trace_bottom[i])
         imax = int(trace_top[i])
         masked_data[imin:imax, i] = np.nan
 
-    # model the background and subtract it
-    kernel = Box2DKernel(100)
+    # model the background with convolution and subtract it
+    kernel = Gaussian2DKernel(200) # Box2DKernel(1000)
     conv_data = interpolate_replace_nans(masked_data, kernel, convolve_fft)
     sub_data = data - conv_data  # background-subtracted data
     sub_data[sub_data < 0] = 0  # avoid negative flux
 
+    # flux in trace aperture
     raw_spectrum = np.zeros_like(trace)
+    convolve_bkg = False
     for i in xs:
-        imin = int(trace_bottom[i])
-        imax = int(trace_top[i])
-        slice_data = sub_data[imin:imax, i]
+        imin_ap = int(trace_bottom[i])
+        imax_ap = int(trace_top[i])
+        if convolve_bkg is True:
+            slice_data = sub_data[imin_ap:imax_ap, i]
+        else:
+            # take average of the bkg at both sides of the aperture
+            # use 20 columns of bkg width on each side
+            imin = int(bkg_bottom[i])
+            sky_bottom = np.mean(data[imin-20:imin, i])
+            imax = int(bkg_top[i])
+            sky_top = np.mean(data[imax:imax+20, i])
+            bkg_sky = (sky_bottom+sky_top)/2
+            slice_data = data[imin_ap:imax_ap, i] - bkg_sky
+        # sum the counts inside the trace aperture
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
             mask = ~sigma_clip(slice_data, maxiters=10).mask
