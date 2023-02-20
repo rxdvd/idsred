@@ -33,11 +33,15 @@ def download_std(std_name):
     response = requests.get(ing_cat_url)
 
     # Search for the URL of the standard star
+    html = None
     if response.status_code == 200:
+        print(response.text.split())
         for line in response.text.split():
             if std_name in line:
                 std_line = line
                 html = std_line.split('"')[1]
+
+    assert html is not None, f"No URL found to download the SED of {std_name}"
 
     # Standard star name as in the ING catalog
     cat_name = os.path.basename(html).split(".")[0]
@@ -225,7 +229,7 @@ def fit_sensfunc(
 
     if std_name is None:
         # choose first standard found
-        std_files = os.path.join(PROCESSING, "*_1d.fits")
+        std_files = os.path.join(PROCESSING, "SP*_1d.fits")
         basename = os.path.basename(glob.glob(std_files)[0])
         std_name = basename.split("_")[0]
 
@@ -274,7 +278,7 @@ def fit_sensfunc(
 
     # calculate telluric correction
     tellurics = sensfunc / flux_ratio
-    mask = (cal_wave > 7350) & (cal_wave < 7550)
+    mask = (cal_wave > 7350) & (cal_wave < 7500)
     tellurics[~mask] = 1
     tellurics[tellurics > 1] = 1
 
@@ -373,9 +377,7 @@ def correct_tellurics(wavelength, flux):
     tell_wave, tellurics = np.loadtxt(tellurics_file).T
 
     tellurics = np.interp(wavelength, tell_wave, tellurics)
-    #corr_flux = flux*tellurics # to be fixed
-    mask = tellurics<1.0
-    corr_flux = np.interp(wavelength, wavelength[~mask], flux[~mask])
+    corr_flux = flux/tellurics
 
     return corr_flux
 
