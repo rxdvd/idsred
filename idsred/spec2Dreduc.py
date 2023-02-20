@@ -415,9 +415,7 @@ def reduce_images(
             )
 
             try:
-                ccd = ccdproc.cosmicray_lacosmic(ccd, niter=10,
-                                                 gain=ccd.header["GAIN"],
-                                                 readnoise=ccd.header["READNOIS"])
+                ccd = ccdproc.cosmicray_lacosmic(ccd, niter=10)
                 if subtract_overscan:
                     ccd = ccdproc.subtract_overscan(
                         ccd,
