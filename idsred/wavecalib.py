@@ -27,14 +27,23 @@ idsred_path = idsred.__path__[0]
 ################
 
 
-def gaussian(x, *params):
-    """Simple Gaussian function for fitting."""
+def _gaussian(x, *params):
+    """Simple Gaussian function for fitting.
+
+    Parameters
+    ----------
+    x: array
+        Measured values.
+    params: list or array-like
+        Amplitude, center, standard deviation and y-axis offset
+        of the Gaussian.
+    """
     amp, x0, sigma, offset = params
     return amp * np.exp(-((x - x0) ** 2) / 2 / sigma**2) + offset
 
 
-def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
-    """Fits Gaussian functions to a lamp.
+def _fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
+    """Fits Gaussian functions to the lines of an arc lamp.
 
     Parameters
     ----------
@@ -44,6 +53,9 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
         Profile of the lamp (e.g. intensity/amplitude in an image).
     peak_ids: array-like
         Indeces of the peaks in the lamp.
+    plot_diag: bool, default ``False``
+        If ``True``, a set of diagnostic plots are shown for each step
+        and the final solution as well.
 
     Returns
     -------
@@ -53,6 +65,8 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
         Centers of the peaks/spectral lines.
     sigmas: array
         Standard deviations of the peaks/spectral lines.
+    offsets: array
+        Y-axis offsets.
     """
     amplitudes, centers, sigmas, offsets = [], [], [], []
     sigma = 1.0  # initial guess
@@ -74,7 +88,7 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
 
         try:
             popt, pcov = curve_fit(
-                gaussian,
+                _gaussian,
                 arc_disp[i_min:i_max],
                 arc_profile[i_min:i_max],
                 p0=guess,
@@ -86,7 +100,7 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
             mask = (arc_disp >= center - 3 * sigma) & (
                 arc_disp <= center + 3 * sigma
             )
-            y_mod = gaussian(arc_disp[mask], *popt)
+            y_mod = _gaussian(arc_disp[mask], *popt)
             residual = y_mod - arc_profile[mask]
             chi2 = np.sum(residual**2 / sigma**2)
             chi2_red = chi2 / (len(y_mod) - len(popt))
@@ -102,7 +116,7 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
                 x_mod = np.linspace(
                     center - 3 * sigma, center + 3 * sigma, 1000
                 )
-                y_mod = gaussian(x_mod, *popt)
+                y_mod = _gaussian(x_mod, *popt)
                 mask = (arc_disp >= x_mod.min()) & (arc_disp <= x_mod.max())
 
                 fig, ax = plt.subplots(figsize=(8, 6))
@@ -142,22 +156,25 @@ def fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
     amplitudes = amplitudes[fit_mask]
     centers = centers[fit_mask]
     sigmas = sigmas[fit_mask]
-    offsets = offsets[fit_mask]  # not needed
+    offsets = offsets[fit_mask]
 
     return amplitudes, centers, sigmas, offsets
 
 
 def find_arc_peaks(data, plot_solution=False, plot_diag=False):
-    """Fits Gaussian functions to a lamp.
+    """Finds the centers of the emission lines of an arc lamp.
+
+    Gaussian functions are fit to the arc lamp lines.
 
     Parameters
     ----------
     data: `~astropy.nddata.CCDData`-like, array-like
         Image data.
-    optimize: bool, default ``True``
-        If ``True``, the peak centers are found by fitting Gaussians.
     plot_solution: bool, default ``False``
         If ``True``, the lamp with the solution is plotted.
+    plot_diag: bool, default ``False``
+        If ``True``, a set of diagnostic plots are shown for each step
+        and the final solution as well.
 
     Returns
     -------
@@ -180,7 +197,7 @@ def find_arc_peaks(data, plot_solution=False, plot_diag=False):
     peak_ids = find_peaks(arc_profile, prominence=prominence)[0]
 
     # peak estimation with gaussian fitting
-    arc_peaks, arc_pixels, arc_sigmas, offsets = fit_gauss2peaks(
+    arc_peaks, arc_pixels, arc_sigmas, offsets = _fit_gauss2peaks(
         arc_disp, arc_profile, peak_ids, plot_diag
     )
 
@@ -223,7 +240,7 @@ def find_arc_peaks(data, plot_solution=False, plot_diag=False):
 #######################
 
 
-def find_nearest(array1, array2):
+def _find_nearest(array1, array2):
     """Finds the nearest values between two arrays.
 
     Finds the values in ``array2`` nearest to ``array1``,
@@ -280,7 +297,7 @@ def find_nearest(array1, array2):
     return ids1, ids2
 
 
-def norm_xaxis(xdata, xmin=None, xmax=None):
+def _norm_xaxis(xdata, xmin=None, xmax=None):
     """Normalises data to be between -1 and 1.
 
     Parameters
@@ -304,7 +321,7 @@ def norm_xaxis(xdata, xmin=None, xmax=None):
     return xnorm
 
 
-def wavelength_function(params, x, func="chebyshev", xmin=None, xmax=None):
+def wavelength_function(params, x, func="legendre", xmin=None, xmax=None):
     """Function to fit for the wavelength solution.
 
     Parameters
@@ -313,15 +330,19 @@ def wavelength_function(params, x, func="chebyshev", xmin=None, xmax=None):
         Whatever parameters the function accepts.
     x: array
         x-coordinate values.
-    func: str
+    func: str, default ``legendre``
         Function to use: ``legendre`` or ``chebyshev``
+    xmin: float, default ``None``
+        Minimum value in the x-coordinate for normalising purposes.
+    xmax: float, default ``None``
+        Maximum value in the x-coordinate for normalising purposes.
 
     Returns
     -------
     y_model: array
         Model evaluated at ``x``.
     """
-    xnorm = norm_xaxis(np.copy(x), xmin, xmax)
+    xnorm = _norm_xaxis(np.copy(x), xmin, xmax)
     if func == "legendre":
         y_model = np.polynomial.legendre.legval(xnorm, params)
     elif func == "chebyshev":
@@ -335,11 +356,11 @@ def wavelength_function(params, x, func="chebyshev", xmin=None, xmax=None):
 # Quick solution
 
 
-def chi_sq(
+def _chi_sq(
     params,
     arc_pixels,
     lamp_wave,
-    func="chebyshev",
+    func="legendre",
     xmin=None,
     xmax=None,
 ):
@@ -353,15 +374,17 @@ def chi_sq(
         Dispersion axis in pixels.
     lamp_wave: array
         Wavelengths of a lamp.
+    func: str, default ``legendre``
+        Function to use: ``legendre`` or ``chebyshev``
 
     Returns
     -------
     chi: float
         Chi squared value.
     """
-    xmin, xmax = 1274.7568, 3699.0979
+    xmin, xmax = 1274.7568, 3699.0979  # ad-hoc values used for the initial solution
     model_wave = wavelength_function(params, arc_pixels, func, xmin, xmax)
-    ids_lamp, ids_model = find_nearest(lamp_wave, model_wave)
+    ids_lamp, ids_model = _find_nearest(lamp_wave, model_wave)
     residual = model_wave[ids_model] - lamp_wave[ids_lamp]
 
     chi = np.sum(residual**2)
@@ -369,16 +392,18 @@ def chi_sq(
     return chi
 
 
-def prepare_params(params):
+def _prepare_params(params):
     """Prepares the parameters to be used with the fitter.
 
     Parameters
     ----------
-    params
+    params: array-like
+        Parameters for the wavelength solution function.
 
     Returns
     -------
-
+    parameters: ``~lmfit.Parameters``
+        Parameters with bounds.
     """
     parameters = Parameters()
     for i, value in enumerate(params):
@@ -403,6 +428,8 @@ def quick_wavelength_solution(
         sigclip=3,
         plot_solution=False,
         data=None,
+        sol_pixels=None,
+        sol_waves=None,
 ):
     """Finds a wavelength solution with a simple fit.
 
@@ -413,7 +440,7 @@ def quick_wavelength_solution(
     lamp_wave: array
         Wavelengths of a lamp.
     func: str, default ``legendre``
-        Polynomial used to fit the wavelength solution.
+        Function used to fit the wavelength solution.
         Either ``chebyshev`` or ``legendre``.
     k: int, default ``3``
         Degree of the polynomial.
@@ -428,6 +455,12 @@ def quick_wavelength_solution(
         If ``True``, the solution is plotted.
     data: `~astropy.nddata.CCDData`-like, array-like
         Image data for plotting purposes only.
+    sol_pixels: array-like, default ``None``
+        Center of the emission lines in pixel units for an initial
+        wavelength solution. If ``None``, a precomputed solution is used.
+    sol_waves: array-like, default ``None``
+        Center of the emission lines in wavelength units for an initial
+        wavelength solution. If ``None``, a precomputed solution is used.
 
     Returns
     -------
@@ -442,19 +475,24 @@ def quick_wavelength_solution(
     # xmin, xmax = arc_pixels0.min(), arc_pixels0.max()
     xmin, xmax = 1274.7568, 3699.0979
 
-    # identify manually
-    pixels = np.array([1712, 1955, 2048, 2213, 2304, 2530])
-    waves = np.array([5400.2, 5852.5, 6030, 6334.4, 6506.5, 6929.5])
-    init_pixels = np.zeros_like(pixels)
-    for i, pix in enumerate(pixels):
-        ids_lamp, _ = find_nearest(arc_pixels, np.array([pix]))
+    if sol_pixels is None or sol_waves is None:
+        # use initial solution provided by the pipeline
+        wavesol_file = os.path.join(idsred_path, 'lamps', 'init_wavesol.txt')
+        sol_pixels, sol_waves = np.loadtxt(wavesol_file).T
+        # else use manual identification provided by the user
+
+    #pixels = np.array([1712, 1955, 2048, 2213, 2304, 2530])
+    #waves = np.array([5400.2, 5852.5, 6030, 6334.4, 6506.5, 6929.5])
+    init_pixels = np.zeros_like(sol_pixels)
+    for i, pix in enumerate(sol_pixels):
+        ids_lamp, _ = _find_nearest(arc_pixels, np.array([pix]))
         init_pixels[i] = arc_pixels[ids_lamp]
 
-    parameters = prepare_params(params)
+    parameters = _prepare_params(params)
     fitter = Minimizer(
-        chi_sq,
+        _chi_sq,
         parameters,
-        fcn_args=(init_pixels, waves, func, xmin, xmax),
+        fcn_args=(init_pixels, sol_waves, func, xmin, xmax),
     )
     result = fitter.minimize(method=method)
     params = [result.params[key].value for key in result.params]
@@ -462,9 +500,9 @@ def quick_wavelength_solution(
     # iterate fit with sigma clipping
     if niter > 0:
         for i in range(niter):
-            parameters = prepare_params(params)
+            parameters = _prepare_params(params)
             fitter = Minimizer(
-                chi_sq,
+                _chi_sq,
                 parameters,
                 fcn_args=(arc_pixels0, lamp_wave, func, xmin, xmax),
             )
@@ -474,16 +512,16 @@ def quick_wavelength_solution(
             calibrated_wave = wavelength_function(
                 params, arc_pixels0, func, xmin, xmax
             )
-            ids_lamp, ids_calwave = find_nearest(lamp_wave, calibrated_wave)
+            ids_lamp, ids_calwave = _find_nearest(lamp_wave, calibrated_wave)
             residuals = calibrated_wave[ids_calwave] - lamp_wave[ids_lamp]
 
             # outliers removal
             mask = ~sigma_clip(residuals, sigma=sigclip).mask
             arc_pixels0 = arc_pixels0[ids_calwave][mask]
 
-    parameters = prepare_params(params)
+    parameters = _prepare_params(params)
     fitter = Minimizer(
-        chi_sq,
+        _chi_sq,
         parameters,
         fcn_args=(arc_pixels0, lamp_wave, func, xmin, xmax),
     )
@@ -520,14 +558,17 @@ def check_solution(
         Wavelengths of a lamp.
     mask: bool array, default ``None``
         Mask of outliers.
-    data: `~astropy.nddata.CCDData`-like, array-like
+    data: `~astropy.nddata.CCDData`-like, array-like, default ``None``.
         Image data for plotting purposes only.
+    func: str, default ``legendre``
+        Function used to fit the wavelength solution.
+        Either ``chebyshev`` or ``legendre``.
     """
     #xmin, xmax = arc_pixels.min(), arc_pixels.max()
     xmin, xmax = 1274.7568, 3699.0979
 
     calibrated_wave = wavelength_function(params, arc_pixels, func, xmin, xmax)
-    ids_lamp, ids_calwave = find_nearest(lamp_wave, calibrated_wave)
+    ids_lamp, ids_calwave = _find_nearest(lamp_wave, calibrated_wave)
 
     residuals = calibrated_wave[ids_calwave] - lamp_wave[ids_lamp]
     n_all = len(calibrated_wave[ids_calwave])
@@ -603,14 +644,14 @@ def check_solution(
         masked_calibrated_wave = wavelength_function(
             params, arc_pixels[~mask], func, xmin, xmax
         )
-        ids_lamp, ids_calwave = find_nearest(lamp_wave, masked_calibrated_wave)
+        ids_lamp, ids_calwave = _find_nearest(lamp_wave, masked_calibrated_wave)
         masked_res = masked_calibrated_wave[ids_calwave] - lamp_wave[ids_lamp]
         mean, std = masked_res.mean(), masked_res.std()
 
         masked_calibrated_wave = wavelength_function(
             params, arc_pixels[mask], func, xmin, xmax
         )
-        ids_lamp, ids_calwave = find_nearest(lamp_wave, masked_calibrated_wave)
+        ids_lamp, ids_calwave = _find_nearest(lamp_wave, masked_calibrated_wave)
         masked_res = masked_calibrated_wave[ids_calwave] - lamp_wave[ids_lamp]
         n_out = len(calibrated_wave[ids_calwave])
 
@@ -635,7 +676,7 @@ def check_solution(
     axes[i + 1].set_xlabel(r"Wavelength ($\AA$)", fontsize=16)
     axes[i + 1].set_ylim(mean - 3 * std, mean + 3 * std)
 
-    axes[0].set_title(f"Residual: {mean:.1f} +/- {std:.2f}"+r" \AA", fontsize=16)
+    axes[0].set_title(f"Residual: {mean:.2f} $+/-$ {std:.2f}"+r" $\AA$", fontsize=16)
     plt.show()
 
 
@@ -648,6 +689,8 @@ def find_wavesol(
     niter=5,
     sigclip=2.5,
     plot_solution=False,
+    sol_pixels=None,
+    sol_waves=None,
 ):
     """Finds the wavelength solution.
 
@@ -656,7 +699,7 @@ def find_wavesol(
     Parameters
     ----------
     func: str, default ``legendre``
-        Polynomial used to fit the wavelength solution.
+        Function used to fit the wavelength solution.
         Either ``chebyshev`` or ``legendre``.
     coefs: array-like, default ``None``
         Initial guess for the parameters for the
@@ -670,6 +713,12 @@ def find_wavesol(
         Threshold for the sigma clipping.
     plot_solution: bool, default ``False``
         If ``True``, the solution is plotted.
+    sol_pixels: array-like, default ``None``
+        Center of the emission lines in pixel units for an initial
+        wavelength solution. If ``None``, a precomputed solution is used.
+    sol_waves: array-like, default ``None``
+        Center of the emission lines in wavelength units for an initial
+        wavelength solution. If ``None``, a precomputed solution is used.
     """
     # load master ARC file
     config = dotenv_values(".env")
@@ -704,6 +753,8 @@ def find_wavesol(
         sigclip=sigclip,
         plot_solution=plot_solution,
         data=data,
+        sol_pixels=sol_pixels,
+        sol_waves=sol_waves,
     )
 
 
@@ -712,14 +763,16 @@ def save_wavesol(func, xmin, xmax, coefs):
 
     Parameters
     ----------
-    func
-    xmin
-    xmax
-    coefs
-
-    Returns
-    -------
-
+    func: str
+        Function used to fit the wavelength solution.
+        Either ``chebyshev`` or ``legendre``.
+    xmin: float
+        Minimum value of the data.
+    xmax: float
+        Maximum value of the data.
+    coefs: array-like
+        Initial guess for the parameters for the
+        wavelength-solution function. Tuple, e.g. (4500, 0.5, 0, 0).
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
@@ -735,9 +788,7 @@ def save_wavesol(func, xmin, xmax, coefs):
 def load_wavesol():
     """Loads the wavelength solution.
 
-    Returns
-    -------
-
+    The solution has to be computed first.
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
@@ -760,11 +811,13 @@ def apply_wavesol(xdata):
 
     Parameters
     ----------
-    xdata
+    xdata: array
+        Values in pixel units.
 
     Returns
     -------
-
+    wavelengths: array
+        Calibrated wavelengths.
     """
     func, xmin, xmax, coefs = load_wavesol()
     wavelengths = wavelength_function(coefs, xdata, func, xmin, xmax)

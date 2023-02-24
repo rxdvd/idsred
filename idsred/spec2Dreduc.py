@@ -21,13 +21,13 @@ logging.getLogger().setLevel(
 )  # not ideal, but ignores annoying warnings
 
 
-def validate_method(method):
+def _validate_method(method):
     """Checks the validity of a method for combining images.
 
     Parameters
     ----------
     method: str
-        Method for conbining images: ``median`` or ``average``.
+        Method for combining images: ``median`` or ``average``.
     """
     valid_methods = ["median", "average"]
     assert (
@@ -100,7 +100,7 @@ def create_images_list(
     return images_list
 
 
-def inv_median(array):
+def _inv_median(array):
     """Inverse median function."""
     return 1 / np.nanmedian(array)
 
@@ -121,7 +121,7 @@ def combine_images(images_list, method="average", scale=None):
     master_image: `~astropy.nddata.CCDData`
         Combined image.
     """
-    validate_method(method)
+    _validate_method(method)
     if method == "median":
         master_image = ccdproc.combine(images_list, method=method, scale=scale)
 
@@ -237,9 +237,6 @@ def create_master_flat(
         Method for conbining images: ``median`` or ``average``.
     scale_flats: bool, default ``True``
         If ``True``, the flats are scaled by the inverse median before being combined.
-    proc_dir: bool, default ``None``
-        Processing directory (where the output are saved). If ``None``, the current
-        directory is used.
     save_output: bool, default ``True``
         If ``True``, the master flat image is saved in the processing directory.
 
@@ -250,7 +247,7 @@ def create_master_flat(
     """
     obstype = "FLAT"
     if scale_flats:
-        scale = inv_median
+        scale = _inv_median
     else:
         scale = None
 
@@ -289,9 +286,6 @@ def create_master_arc(
         If ``True``, the arcs from the beginning of the night are used.
     method: str, default ``average``
         Method for combining images: ``median`` or ``average``.
-    proc_dir: bool, default ``None``
-        Processing directory (where the output are saved). If ``None``, the current
-        directory is used.
     save_output: bool, default ``True``
         If ``True``, the master flat image is saved in the processing directory.
 
@@ -371,9 +365,6 @@ def reduce_images(
         If ``True``, the image gets trimmed.
     method: str, default ``average``
         Method for conbining images: ``median`` or ``average``.
-    proc_dir: bool, default ``None``
-        Processing directory (where the output are saved). If ``None``, the current
-        directory is used.
     save_output: bool, default ``True``
         If ``True``, the science images are saved in the processing directory.
 
@@ -438,7 +429,7 @@ def reduce_images(
                 print(error)
 
         if len(target_list) > 0:
-            validate_method(method)
+            _validate_method(method)
             combiner = ccdproc.Combiner(target_list)
             if method == "average":
                 red_target = combiner.average_combine()
@@ -468,7 +459,21 @@ def quick_2Dreduction(
     method="average",
     corr_flat=True
 ):
+    """Performs a "quick" 2D image reduction.
 
+    Mostly default parameters are used, but should work in most cases.
+
+    Parameters
+    ----------
+    observations: `~ImageFileCollection`
+        Table-like object with images information.
+    subtract_overscan: bool, default ``True``.
+        If ``True``, the image gets overscan subtract.
+    trim_image: bool, default ``True``.
+        If ``True``, the image gets trimmed.
+    method: str, default ``average``
+        Method for combining images: ``median`` or ``average``.
+    """
     if observations is None:
         observations = collect_data()
 

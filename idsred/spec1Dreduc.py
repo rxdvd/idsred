@@ -108,8 +108,17 @@ def quick_trace(
     return raw_spectrum
 
 
-def get_profile_model(params, ys):
-    """Gaussian function with offset for fitting."""
+def _get_profile_model(params, ys):
+    """Gaussian function with offset for fitting.
+
+    Parameters
+    ----------
+    params: list or array-like
+        Amplitude, center, standard deviation and y-axis offset
+        of the Gaussian.
+    ys: array
+        Measured values.
+    """
     amplitude, center, sigma, yoffset = params
 
     profile = np.exp(-((ys - center) ** 2) / 2 / sigma**2)
@@ -120,9 +129,20 @@ def get_profile_model(params, ys):
     return profile
 
 
-def get_profile_chisq(params, ys, profile):
-    """Reduced chi-squared for fitting."""
-    model = get_profile_model(params, ys)
+def _get_profile_chisq(params, ys, profile):
+    """Reduced chi-squared for fitting.
+
+    Parameters
+    ----------
+    params: list or array-like
+        Amplitude, center, standard deviation and y-axis offset
+        of the Gaussian.
+    ys: array
+        Measured values.
+    profile: array
+        Profile of the observed Gaussian.
+    """
+    model = _get_profile_model(params, ys)
 
     return np.sum((profile - model) ** 2 / (profile.size - len(params)))
 
@@ -143,8 +163,8 @@ def optimised_trace(
 
     Parameters
     ----------
-    data: `~astropy.nddata.CCDData`-like, array-like
-        Image data.
+    hdu: Header Data Unit
+        HDU 2D image.
     center: float or None, optional
         Initial guess of the trace center. If not give, one is obtained with ``find_peaks``,
         using the peak with the largest amplitud.
@@ -205,13 +225,13 @@ def optimised_trace(
             warnings.simplefilter("ignore", UserWarning)
             guess = (amp, center, 5, np.nanmedian(profile))
 
-        results = minimize(get_profile_chisq, guess, args=(ys, profile))
+        results = minimize(_get_profile_chisq, guess, args=(ys, profile))
         params = results.x
         if params[2] < 20:
             ycenter[icol] = params[1]
             ywidth[icol] = 4 * params[2]  # aperture width of 4 sigmas
             bkg_width[icol] = 6 * params[2]  # bkg starts at 6 sigmas
-            model = get_profile_model(params, ys)
+            model = _get_profile_model(params, ys)
 
             # diagnostic plots for each step
             if plot_diag:
@@ -324,19 +344,18 @@ def optimised_trace(
         if convolve_bkg is True:
             slice_data = sub_data[imin_ap:imax_ap, i]
         else:
-            # take average of the bkg at both sides of the aperture
-            # use 20 columns of bkg width on each side
+            # estimate background:
+            # take average of the sky at both sides of the aperture
             imin = int(bkg_bottom[i])
-            sky_bottom = np.mean(data[imin-20:imin, i])
+            sky_bottom = np.nanmedian(data[imin-30:imin, i])
             imax = int(bkg_top[i])
-            sky_top = np.mean(data[imax:imax+20, i])
+            sky_top = np.nanmedian(data[imax:imax+30, i])
             bkg_sky = (sky_bottom+sky_top)/2
+            # background subtraction
             slice_data = data[imin_ap:imax_ap, i] - bkg_sky
+
         # sum the counts inside the trace aperture
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", UserWarning)
-            mask = ~sigma_clip(slice_data, maxiters=10).mask
-            raw_spectrum[i] = np.nansum(slice_data[mask])
+        raw_spectrum[i] = np.nansum(slice_data)
 
     # the axis is inverted
     raw_spectrum = raw_spectrum[::-1]
@@ -353,6 +372,17 @@ def optimised_trace(
 
 
 def quick_1Dreduction(plot_diag=False, plot_trace=False):
+    """Performs a "quick" 2D image reduction.
+
+    Mostly default parameters are used, but should work in most cases.
+
+    Parameters
+    ----------
+    plot_diag: bool, default ``False``
+        If ``True``, a set of diagnostic plots are shown for each step and the final solution as well.
+    plot_trace: bool, default ``False``
+        If ``True``, the image is plotted with the trace. The raw spectrum is also plotted.
+    """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
 

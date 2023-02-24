@@ -10,7 +10,18 @@ from astropy.utils.exceptions import AstropyWarning
 
 
 def collect_data(path=None):
+    """Collects all the data in a given directory.
 
+    Parameters
+    ----------
+    path: str, default ``None``
+        Path to the directory.
+
+    Returns
+    -------
+    observations: `~ImageFileCollection`
+        Table-like object with images information.
+    """
     if path is None:
         config = dotenv_values(".env")
         path = config["WORKDIR"]
@@ -23,6 +34,17 @@ def collect_data(path=None):
 
 
 def update_header(hdu, new_header):
+    """Updates the header of an image.
+
+    Keywords are added, not replaced.
+
+    Parameters
+    ----------
+    hdu: `~fits.hdu`
+        Header Data Unit.
+    new_header: `~fits.hdu.header`
+        New header to append.
+    """
     header = hdu[0].header
     skip_keywords = ["SIMPLE", "BITPIX", "NAXIS", "NAXIS1", "NAXIS2", "EXTEND"]
 
@@ -35,8 +57,6 @@ def update_header(hdu, new_header):
 def plot_image(hdu):
     """Plots a 2D image.
 
-    Parameters
-    ----------
     Parameters
     ----------
     hdu: ~fits.hdu
@@ -95,7 +115,7 @@ def fits2array(hdu):
 
     Parameters
     ----------
-    hdu: ~fits.hdu
+    hdu: `~fits.hdu`
         Header Data Unit.
 
     Returns
@@ -104,10 +124,6 @@ def fits2array(hdu):
         Wavelengths of a spectrum.
     flux: array
         Flux density of a spectrum.
-    bkg: array
-        Background of a spectrum.
-    err: array
-        Flux density error of a spectrum.
     """
     flux = hdu[0].data
     header = hdu[0].header

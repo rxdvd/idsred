@@ -14,13 +14,12 @@ from dotenv import dotenv_values
 import astropy.units as u
 from astropy.io import fits
 from specutils.spectra import Spectrum1D
-from specutils.fitting.continuum import fit_continuum
-from scipy.interpolate import UnivariateSpline
+from specutils.manipulation import box_smooth
+
+from .wavecalib import apply_wavesol
 
 import idsred
-
 idsred_path = idsred.__path__[0]
-from .wavecalib import apply_wavesol
 
 # List of extension for the standard stars from the ING catalog.
 # Those with "a." are in AB magnitudes, while those without are in flux (mJy).
@@ -29,6 +28,16 @@ std_json_file = os.path.join(idsred_path, "standards", "standards.json")
 
 
 def download_std(std_name):
+    """Downloads an ING standard star.
+
+    URL used:
+    https://www.ing.iac.es//Astronomy/observing/manuals/html_manuals/tech_notes/tn065-100/workflux.html
+
+    Parameters
+    ----------
+    std_name: str
+        Standard star name. E.g. `SP0105+625`.
+    """
     ing_cat_url = "https://www.ing.iac.es//Astronomy/observing/manuals/html_manuals/tech_notes/tn065-100/workflux.html"
     response = requests.get(ing_cat_url)
 
@@ -71,6 +80,21 @@ def download_std(std_name):
 
 
 def get_std_file(std_name):
+    """Gets the standard star file.
+
+    The file is downloaded if it is not found in the
+    local installation.
+
+    Parameters
+    ----------
+    std_name: str
+        Standard star name. E.g. `SP0105+625`.
+
+    Returns
+    -------
+    outfile: str
+        Full path of the standard star file.
+    """
     global idsred_path, std_json_file
     with open(std_json_file, "r") as file:
         std_dict = json.load(file)
@@ -90,7 +114,15 @@ def get_std_file(std_name):
         return outfile
 
 
-def find_skiprows(filename):
+def _find_skiprows(filename):
+    """Finds out how many rows to skip when reading the
+    standard star files.
+
+    Parameters
+    ----------
+    filename: str
+        Standard star file.
+    """
     skiprows = 0
     with open(filename) as file:
         for i, line in enumerate(file.readlines()):
@@ -101,7 +133,17 @@ def find_skiprows(filename):
     return skiprows
 
 
-def convert_flux(calspec):
+def _convert_flux(calspec):
+    """Convert the flux of a calibrated ING standard star.
+
+    Conversion from AB magnitudes or flux in mJy to flux
+    in erg/cm**2/s/AA
+
+    Parameters
+    ----------
+    calspec: `pandas.DataFrame`
+        Calibrated standard star SED.
+    """
     wave = calspec["wave"].values
     if "mag" in calspec.columns:
         mag = calspec["mag"].values  # assumed to be in AB
@@ -115,9 +157,21 @@ def convert_flux(calspec):
     calspec["flux"] = flux_lam
 
 
-def get_calspec(std_name):
+def _get_calspec(std_name):
+    """Retrieves the calibrated standard star SED.
+
+    Parameters
+    ----------
+    std_name: str
+        Standard star name. E.g. `SP0105+625`.
+
+    Returns
+    -------
+    calspec: `pandas.DataFrame`
+        Calibrated standard star SED.
+    """
     filename = get_std_file(std_name)
-    skiprows = find_skiprows(filename)
+    skiprows = _find_skiprows(filename)
     if (
         filename.endswith("a.sto")
         or filename.endswith("a.og")
@@ -130,13 +184,25 @@ def get_calspec(std_name):
     calspec = pd.read_csv(
         filename, delim_whitespace=True, skiprows=skiprows, names=columns
     )
-    convert_flux(calspec)
+    _convert_flux(calspec)
 
     return calspec
 
 
 def plot_calspec(calspec, units="flux"):
-    fig, ax = plt.subplots(figsize=(8, 6))
+    """Plots the calibrated standard star SED.
+
+    Parameters
+    -------
+    calspec: str or `pandas.DataFrame`
+        Standard star name or calibrated SED.
+    units: str, default ``flux``
+        Either ``flux`` or ``mag``.
+    """
+    if type(calspec)==str:
+        calspec = _get_calspec(calspec)
+
+    fig, ax = plt.subplots(figsize=(12, 6))
 
     if units == "mag":
         ax.plot(calspec["wave"], calspec["mag"], lw=2)
@@ -152,7 +218,26 @@ def plot_calspec(calspec, units="flux"):
 
 
 def get_standard(std_name, fmask=True):
+    """Gets the observed standard star SED.
 
+    The SED is wavelength calibrated.
+
+    Parameters
+    ----------
+    std_name: str
+        Standard star name. E.g. `SP0105+625`.
+    fmask: bool, default ``True``
+        If ``True``, negative fluxes are masked out.
+
+    Returns
+    -------
+    cal_wave: array
+        Wavelength of the standard star SED.
+    raw_flux: array
+        Uncalibrated flux of the standard star SED.
+    hdu: `~fits.hdu`
+        Header Data Unit of the standard star file.
+    """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
     obs_std_file = os.path.join(PROCESSING, f"{std_name}_1d.fits")
@@ -170,7 +255,7 @@ def get_standard(std_name, fmask=True):
     return cal_wave, raw_flux, hdu
 
 
-def calc_airmass(hdu):
+def _calc_airmass(hdu):
     """Calculates the airmass for a given target.
 
     The zenith es calculated as the average of
@@ -194,7 +279,7 @@ def calc_airmass(hdu):
     return airmass
 
 
-def correct_extinction(wave, flux, airmass):
+def _correct_extinction(wave, flux, airmass):
     """Corrects a spectrum for atmospheric extinction.
 
     Parameters
@@ -222,8 +307,28 @@ def correct_extinction(wave, flux, airmass):
     return corr_flux
 
 def fit_sensfunc(
-    std_name=None, fmask=True, degree=5, xmin=None, xmax=None, plot_diag=False
+    std_name=None, fmask=True, degree=5, xmin=3600, xmax=None, plot_diag=False
 ):
+    """Fits the sensitivity function using a standard star.
+
+    A simple polynomial is used.
+
+    Parameters
+    ----------
+    std_name: str, default ``None``
+        Standard star name. E.g. `SP0105+625`. If ``None``,
+        use the first one.
+    fmask: bool, default ``True``
+        If ``True``, negative fluxes are masked out.
+    degree: float, default ``5``
+        Degree of the polynomial
+    xmin: float, default ``3600``
+        Minimum wavelength to use.
+    xmax: float, default ``None``
+        Maximum wavelength to use.
+    plot_diag: bool, default ``False``
+        If ``True``, diagnostic plots are shown with the solution.
+    """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
 
@@ -235,12 +340,12 @@ def fit_sensfunc(
 
     # observed standard
     cal_wave, raw_flux, std_hdu = get_standard(std_name, fmask)
-    # correct for atmospheric extinction at Roque de Los Muchachos observatory
-    airmass = calc_airmass(std_hdu)
-    raw_flux = correct_extinction(cal_wave, raw_flux, airmass)
+    # correct for atmospheric extinction at Observatorio Roque de Los Muchachos
+    airmass = _calc_airmass(std_hdu)
+    raw_flux = _correct_extinction(cal_wave, raw_flux, airmass)
 
     # catalog/calibrated standard
-    calspec = get_calspec(std_name)
+    calspec = _get_calspec(std_name)
     interp_calflux = np.interp(
         cal_wave, calspec.wave.values, calspec.flux.values
     )
@@ -278,7 +383,7 @@ def fit_sensfunc(
 
     # calculate telluric correction
     tellurics = sensfunc / flux_ratio
-    mask = (cal_wave > 7350) & (cal_wave < 7500)
+    mask = ((cal_wave > 6650) & (cal_wave < 6750)) | ((cal_wave > 7350) & (cal_wave < 7500))
     tellurics[~mask] = 1
     tellurics[tellurics > 1] = 1
 
@@ -306,11 +411,12 @@ def save_sensfunc(xmin, xmax, coefs):
 
     Parameters
     ----------
-    coefs
-
-    Returns
-    -------
-
+    xmin: float
+        Minimum value of the data.
+    xmax: float
+        Maximum value of the data.
+    coefs: array-like
+        Coefficients for the sensitivity function.
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
@@ -323,11 +429,16 @@ def save_sensfunc(xmin, xmax, coefs):
 
 
 def load_sensfunc():
-    """Loads the sensitivity function coefficients.
+    """Loads the sensitivity function parameters.
 
     Returns
     -------
-
+    xmin: float
+        Minimum value of the data.
+    xmax: float
+        Maximum value of the data.
+    coefs: array-like
+        Coefficients for the sensitivity function.
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
@@ -349,12 +460,17 @@ def apply_sensfunc(wavelength, raw_flux):
 
     Parameters
     ----------
-    xdata
-    raw_flux
+    wavelength: array
+        Calibrated wavelengths.
+    raw_flux: array
+        Uncalibrated fluxes.
 
     Returns
     -------
-
+    wavelength: array
+        Calibrated wavelengths (same as input).
+    flux: array
+        Calibrated fluxes.
     """
     min_wave, max_wave, coefs = load_sensfunc()
     log_sensfunc = np.polyval(coefs, wavelength)
@@ -370,6 +486,17 @@ def apply_sensfunc(wavelength, raw_flux):
 def correct_tellurics(wavelength, flux):
     """Corrects for telluric absorptions.
 
+    Parameters
+    ----------
+    wavelength: array
+        Calibrated wavelengths.
+    flux: array
+        Calibrated fluxes.
+
+    Returns
+    -------
+    corr_flux: array
+        Corrected fluxes.
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
@@ -381,7 +508,18 @@ def correct_tellurics(wavelength, flux):
 
     return corr_flux
 
-def calibrate_spectra():
+def calibrate_spectra(smoothing=False):
+    """Calibrates all the spectra in the working directory.
+
+    The spectra are wavelength- and flux-calibrated, including
+    atmospheric and telluric corrections.
+
+    Parameters
+    ----------
+    smoothing: bool, default ``False``
+        If ``True``, the spectra is smoothed with a window
+        of 5 angstrom.
+    """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
     files_path = os.path.join(PROCESSING, "*_1d.fits")
@@ -400,6 +538,13 @@ def calibrate_spectra():
 
         # telluric correction
         cal_flux = correct_tellurics(cal_wave, cal_flux)
+
+        # apply smoothing
+        if smoothing is True:
+            spec = Spectrum1D(spectral_axis=cal_wave * u.angstrom,
+                              flux=cal_flux * u.Jy)  # flux units don't matter
+            spec_bsmooth = box_smooth(spec, width=5)
+            cal_flux = spec_bsmooth.flux.value
 
         # and flux to HDU data and wavelength calibration to header
         hdu[0].data = cal_flux
