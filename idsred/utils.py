@@ -54,23 +54,28 @@ def update_header(hdu, new_header):
             header.append(content)
 
 
-def plot_image(hdu):
+def plot_image(image):
     """Plots a 2D image.
 
     Parameters
     ----------
-    hdu: ~fits.hdu
-        Header Data Unit.
+    image: ~fits.hdu or array
+        Header Data Unit or image data.
 
     Returns
     -------
     ax: `~.axes.Axes`
         Plot axis.
     """
-    data = hdu[0].data
-    header = hdu[0].header
-    if data is None:
-        data = hdu[1].data
+    try:
+        hdu = image
+        data = hdu[0].data
+        header = hdu[0].header
+        if data is None:
+            data = hdu[1].data
+    except:
+        data = image
+        header = {"OBJECT": ''}
 
     m, s = np.nanmean(data), np.nanstd(data)
 

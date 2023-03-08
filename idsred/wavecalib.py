@@ -232,6 +232,30 @@ def find_arc_peaks(data, plot_solution=False, plot_diag=False):
         ax.legend()
         plt.show()
 
+        # zoom-in plots
+        cut = 1940
+        xmin = 1000
+        xmax = 3750
+
+        blue_profile = arc_profile[xmin:cut]
+        blue_columns = np.arange(xmin, cut)
+        red_profile = arc_profile[cut:xmax]
+        red_columns = np.arange(cut, xmax)
+
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(blue_columns, blue_profile)
+        ax.set_ylabel("Intensity", fontsize=16)
+        ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
+        ax.legend()
+        plt.show()
+
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(red_columns, red_profile)
+        ax.set_ylabel("Intensity", fontsize=16)
+        ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
+        ax.legend()
+        plt.show()
+
     return arc_pixels, arc_peaks, arc_sigmas
 
 
@@ -389,6 +413,13 @@ def _chi_sq(
 
     chi = np.sum(residual**2)
 
+    # check if the function monotonically increases
+    edges_pixels = np.array([0, 1, 4999, 5000])
+    check_wave = wavelength_function(params, edges_pixels, func, xmin, xmax)
+    if (check_wave[0]>check_wave[1]) or (check_wave[-2]>check_wave[-1]):
+        # blow up the residual
+        return 1e6
+
     return chi
 
 
@@ -455,10 +486,10 @@ def quick_wavelength_solution(
         If ``True``, the solution is plotted.
     data: `~astropy.nddata.CCDData`-like, array-like
         Image data for plotting purposes only.
-    sol_pixels: array-like, default ``None``
+    sol_pixels: array, default ``None``
         Center of the emission lines in pixel units for an initial
         wavelength solution. If ``None``, a precomputed solution is used.
-    sol_waves: array-like, default ``None``
+    sol_waves: array, default ``None``
         Center of the emission lines in wavelength units for an initial
         wavelength solution. If ``None``, a precomputed solution is used.
 

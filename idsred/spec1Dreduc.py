@@ -23,7 +23,7 @@ from astropy.utils.exceptions import AstropyWarning
 
 
 def quick_trace(
-    data, center=None, width=50, gap=20, sky_width=40, plot_trace=False
+    hdu, center=None, width=50, gap=20, sky_width=40, plot_trace=False
 ):
     """Extracts a "raw" spectrum in a quick way.
 
@@ -31,8 +31,8 @@ def quick_trace(
 
     Parameters
     ----------
-    data: `~astropy.nddata.CCDData`-like, array-like
-        Image data.
+    hdu: Header Data Unit
+        HDU 2D image.
     center: float or None, optional
         Center of the trace. If not give, one is obtained with ``find_peaks``,
         using the peak with the largest amplitud.
@@ -50,6 +50,9 @@ def quick_trace(
     raw_spectrum: array
         Raw spectrum of the image.
     """
+    data = hdu[0].data
+    header = hdu[0].header
+
     if center is None:
         ny, nx = data.shape
         center0 = ny // 2
@@ -65,33 +68,34 @@ def quick_trace(
             peak_id = np.argmax(data[:, nx // 2][peaks])
             center = peaks[peak_id]
 
-    imin = int(center - width // 2)
-    imax = int(center + width // 2)
-    raw_spectrum = np.nansum(data[imin:imax], axis=0)
-
     # sky on one side
     imin_sky1 = int(center - (width // 2 + gap + sky_width))
     imax_sky1 = int(center - (width // 2 + gap))
-    sky1 = np.nansum(data[imin_sky1:imax_sky1], axis=0)
+    sky1 = np.nanmean(data[imin_sky1:imax_sky1], axis=0)
 
     # sky on the other side
     imin_sky2 = int(center + (width // 2 + gap))
     imax_sky2 = int(center + (width // 2 + gap + sky_width))
-    sky2 = np.nansum(data[imin_sky2:imax_sky2], axis=0)
+    sky2 = np.nanmean(data[imin_sky2:imax_sky2], axis=0)
 
-    # sky subtraction
-    sky = np.nanmean(sky1 + sky2, axis=0)
-    raw_spectrum = raw_spectrum - sky
+    # pseudo-interpolation of the sky by taking the mean
+    sky = (sky1 + sky2) / 2
+
+    # sum flux in aperture and subtract sky
+    imin = int(center - width // 2)
+    imax = int(center + width // 2)
+    raw_spectrum = np.nansum(data[imin:imax] - sky, axis=0)
 
     # invert axis and convert masked array into array
-    raw_spectrum = raw_spectrum[::-1].data
+    raw_spectrum = raw_spectrum[::-1]
 
     if plot_trace:
         for i in range(2):
             if i == 1:
-                data = data[:, 1900:2100]
+                data = data[:, 1700:2300]
 
             ax = plot_image(data)
+            ax.set_title(header["OBJECT"], fontsize=16)
             ax.axhline(imin, c="r", lw=2, label="aperture")
             ax.axhline(imax, c="r", lw=2)
             ax.axhspan(imin_sky1, imax_sky1, color="g", alpha=0.4, label="sky")
