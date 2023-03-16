@@ -71,18 +71,8 @@ def create_images_list(
     ):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", AstropyWarning)
-            ccd = CCDData.read(filename, hdu=1, unit=u.adu)
-
-        ## Set up the reduction based on Gain and Readout.
-        ccd = ccdproc.create_deviation(
-            ccd,
-            gain=ccd.header["GAIN"] * u.electron / u.adu,
-            readnoise=ccd.header["READNOIS"] * u.electron,
-        )
-        ## Actually correct for gain.
-        ccd = ccdproc.gain_correct(
-            ccd, ccd.header["GAIN"] * u.electron / u.adu
-        )
+            # initial data on first extension
+            ccd = CCDData.read(filename, hdu=1, unit=u.electron)
 
         if subtract_overscan:
             ccd = ccdproc.subtract_overscan(
@@ -93,6 +83,7 @@ def create_images_list(
             )
         if trim_image:
             ccd = ccdproc.trim_image(ccd, ccd.header["TRIMSEC"])
+            #ccd = ccdproc.trim_image(ccd[360:3601, :])
         if master_bias is not None:
             ccd = ccdproc.subtract_bias(ccd, master_bias)
         images_list.append(ccd)
@@ -113,7 +104,7 @@ def combine_images(images_list, method="average", scale=None):
     images_list: list
         List of images.
     method: str, default ``average``
-        Method for conbining images: ``median`` or ``average``.
+        Method for combining images: ``median`` or ``average``.
     scale: function or `numpy.ndarray`-like or None, optional
 
     Returns
@@ -125,8 +116,7 @@ def combine_images(images_list, method="average", scale=None):
     if method == "median":
         master_image = ccdproc.combine(images_list, method=method, scale=scale)
 
-    else:
-        # average
+    elif method == "average":
         master_image = ccdproc.combine(
             images_list,
             method=method,
@@ -200,7 +190,7 @@ def correct_flat(flat):
     flat: array
         Combined flats.
 
-    Retunrs
+    Returns
     -------
     master_flat: array
         Corrected master flat.
@@ -251,7 +241,6 @@ def create_master_flat(
     else:
         scale = None
 
-    # subtract_overscan = False
     flat_list = create_images_list(
         observations, obstype, subtract_overscan, trim_image, master_bias
     )
@@ -394,8 +383,8 @@ def reduce_images(
                 master_header = header
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", AstropyWarning)
-                ccd = CCDData(hdu[1].data, header=header, unit=u.adu)
-
+                ccd = CCDData(hdu[1].data, header=header, unit=u.electron)
+            """
             ccd = ccdproc.create_deviation(
                 ccd,
                 gain=ccd.header["GAIN"] * u.electron / u.adu,
@@ -404,9 +393,9 @@ def reduce_images(
             ccd = ccdproc.gain_correct(
                 ccd, ccd.header["GAIN"] * u.electron / u.adu
             )
-
+            """
             try:
-                ccd = ccdproc.cosmicray_lacosmic(ccd, niter=10)
+                ccd = ccdproc.cosmicray_lacosmic(ccd, niter=10, sigfrac=0.3, psffwhm=2.5)
                 if subtract_overscan:
                     ccd = ccdproc.subtract_overscan(
                         ccd,
@@ -416,10 +405,11 @@ def reduce_images(
                     )
                 if trim_image:
                     ccd = ccdproc.trim_image(ccd, ccd.header["TRIMSEC"])
+                    #ccd = ccdproc.trim_image(ccd[360:3601, :])
                 if master_bias is not None:
                     ccd = ccdproc.subtract_bias(ccd, master_bias)
                 if master_flat is not None:
-                    ccd = ccdproc.flat_correct(ccd, master_flat, min_value=0.1)
+                    ccd = ccdproc.flat_correct(ccd, master_flat, min_value=0.01)
 
                 # Rotate Frame
                 ccd.data = ccd.data.T
@@ -433,7 +423,7 @@ def reduce_images(
             combiner = ccdproc.Combiner(target_list)
             if method == "average":
                 red_target = combiner.average_combine()
-            else:
+            elif method == "median":
                 red_target = combiner.median_combine()
 
             red_hdu = red_target.to_hdu()
@@ -479,16 +469,16 @@ def quick_2Dreduction(
 
     create_master_arc(observations, beginning=True, method=method)
     master_bias = create_master_bias(
-        observations, subtract_overscan, trim_image, method
+        observations, subtract_overscan=False, trim_image=True, method=method
     )
     master_flat = create_master_flat(
-        observations, master_bias, subtract_overscan, trim_image, method, corr_flat=corr_flat
+        observations, master_bias, subtract_overscan=False, trim_image=True, method=method, corr_flat=corr_flat
     )
     _ = reduce_images(
         observations,
         master_bias,
         master_flat,
-        subtract_overscan,
-        trim_image,
-        method,
+        subtract_overscan=False,
+        trim_image=True,
+        method=method,
     )

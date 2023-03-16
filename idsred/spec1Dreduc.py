@@ -233,8 +233,8 @@ def optimised_trace(
         params = results.x
         if params[2] < 20:
             ycenter[icol] = params[1]
-            ywidth[icol] = 4 * params[2]  # aperture width of 4 sigmas
-            bkg_width[icol] = 6 * params[2]  # bkg starts at 6 sigmas
+            ywidth[icol] = 2 * params[2]  # aperture width in sigmas units
+            bkg_width[icol] = 6 * params[2]  # beginning of bkg in sigma units
             model = _get_profile_model(params, ys)
 
             # diagnostic plots for each step
@@ -281,11 +281,12 @@ def optimised_trace(
         trace_bottom = trace - np.median(ywidth)
         bkg_top = trace + np.median(bkg_width)
         bkg_bottom = trace - np.median(bkg_width)
+        sky_width = 50
 
     # final diagnostic plots
     if plot_diag:
         # spline fit
-        fig, ax = plt.subplots(2, figsize=(12, 6), sharex=True)
+        fig, ax = plt.subplots(2, figsize=(14, 4), sharex=True)
         ax[0].plot(cols, ycenter, "ro", label="data")
         ax[0].plot(xs, trace, "r", label="spline")
         ax[0].plot(xs, trace_top, "r", ls="--", label="aperture")
@@ -307,56 +308,77 @@ def optimised_trace(
         plt.show()
 
     if plot_trace:
-        for i in range(2):
-            ymax, xmax = data.shape
-            ymin, xmin = 0, 0
-            if i == 1:
-                # zoom in the centre
-                xmin, xmax = 1700, 2300
+        ymax, xmax = data.shape
+        ymin, xmin = 0, 0
 
-            ax = plot_image(hdu)
-            ax.plot(xs, trace_top, c="r", lw=1, label="aperture")
-            ax.plot(xs, trace_bottom, c="r")
-            ax.plot(xs, bkg_top, c="g", lw=1, label="background")
-            ax.plot(xs, bkg_bottom, c="g")
-            ax.set_xlim(xmin, xmax)
-            ax.set_ylim(ymin, ymax)
-
-        ax.legend(fontsize=16)
+        # plot full trace
+        ax = plot_image(hdu)
+        ax.plot(xs, trace_top, c="r", lw=1)
+        ax.plot(xs, trace_bottom, c="r")
+        ax.fill_between(xs, bkg_top, bkg_top+sky_width, color="g", alpha=0.5)
+        ax.fill_between(xs, bkg_bottom, bkg_bottom-sky_width, color="g", alpha=0.5)
+        ax.set_xlim(xmin, xmax)
+        ax.set_ylim(ymin, ymax)
         plt.show()
 
-    # for the background convolution
-    # starts exactly where the aperture ends
-    masked_data = data.copy()
-    for i in xs:
-        imin = int(trace_bottom[i])
-        imax = int(trace_top[i])
-        masked_data[imin:imax, i] = np.nan
+        # zoom-in trace + slice
+        fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+        # zoom-in first
+        m, s = np.nanmean(data), np.nanstd(data)
+        xmin, xmax = xmax//2-300, xmax//2+300
 
-    # model the background with convolution and subtract it
-    kernel = Gaussian2DKernel(200) # Box2DKernel(1000)
-    conv_data = interpolate_replace_nans(masked_data, kernel, convolve_fft)
-    sub_data = data - conv_data  # background-subtracted data
-    sub_data[sub_data < 0] = 0  # avoid negative flux
+        im = axes[0].imshow(data,
+                            interpolation="nearest",
+                            cmap="gray",
+                            vmin=m - s,
+                            vmax=m + s,
+                            origin="lower",
+        )
+        fig.colorbar(im, ax=axes[0], fraction=0.046, pad=0.04)
+        axes[0].set_title(header["OBJECT"], fontsize=16)
+        axes[0].plot(xs, trace_top, c="r", lw=1, label="aperture")
+        axes[0].plot(xs, trace_bottom, c="r")
+        axes[0].fill_between(xs, bkg_top, bkg_top + sky_width, color="g", alpha=0.5, label="background")
+        axes[0].fill_between(xs, bkg_bottom, bkg_bottom - sky_width, color="g", alpha=0.5)
+        axes[0].set_xlim(xmin, xmax)
+        axes[0].set_ylim(ymin, ymax)
+        axes[0].legend(fontsize=16)
+
+        # slice plot
+        index = (xmin+xmax)//2
+        slice = data[:, index]
+        cols = np.arange(ymax)
+        axes[1].plot(cols, slice, c="k", lw=2)  # trace profile
+        axes[1].axvline(trace_top[index], c="r", lw=1)
+        axes[1].axvline(trace_bottom[index], c="r", lw=1)
+
+        y_bkg = np.arange(slice.min()*0.9, slice.max()*1.1)
+        axes[1].fill_betweenx(y_bkg, bkg_top[index], bkg_top[index] + sky_width, color="g", alpha=0.5)
+        axes[1].fill_betweenx(y_bkg, bkg_bottom[index], bkg_bottom[index] - sky_width, color="g", alpha=0.5)
+        axes[1].set_xlim(bkg_bottom[index] - sky_width - 30, bkg_top[index] + sky_width + 30)
+        axes[1].set_ylim(None, slice.max()*1.1)
+
+        #bkg = (np.nanmedian(slice[int(bkg_top[index]):int(bkg_top[index]) + sky_width]) +
+        #       np.nanmedian(slice[int(bkg_bottom[index]) - sky_width:int(bkg_top[index])] ) )/2
+        #axes[2].plot(cols, slice-bkg, c="k", lw=2)
+
+        plt.show()
 
     # flux in trace aperture
     raw_spectrum = np.zeros_like(trace)
-    convolve_bkg = False
     for i in xs:
         imin_ap = int(trace_bottom[i])
         imax_ap = int(trace_top[i])
-        if convolve_bkg is True:
-            slice_data = sub_data[imin_ap:imax_ap, i]
-        else:
-            # estimate background:
-            # take average of the sky at both sides of the aperture
-            imin = int(bkg_bottom[i])
-            sky_bottom = np.nanmedian(data[imin-30:imin, i])
-            imax = int(bkg_top[i])
-            sky_top = np.nanmedian(data[imax:imax+30, i])
-            bkg_sky = (sky_bottom+sky_top)/2
-            # background subtraction
-            slice_data = data[imin_ap:imax_ap, i] - bkg_sky
+
+        # estimate background:
+        # take average of the sky at both sides of the aperture
+        imin = int(bkg_bottom[i])
+        sky_bottom = np.nanmedian(data[imin-sky_width:imin, i])
+        imax = int(bkg_top[i])
+        sky_top = np.nanmedian(data[imax:imax+sky_width, i])
+        bkg_sky = (sky_bottom+sky_top)/2
+        # background subtraction
+        slice_data = data[imin_ap:imax_ap, i] - bkg_sky
 
         # sum the counts inside the trace aperture
         raw_spectrum[i] = np.nansum(slice_data)

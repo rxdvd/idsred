@@ -307,7 +307,7 @@ def _correct_extinction(wave, flux, airmass):
     return corr_flux
 
 def fit_sensfunc(
-    std_name=None, fmask=True, degree=5, xmin=3600, xmax=None, plot_diag=False
+    std_name=None, fmask=True, degree=5, wmin=3600, wmax=None, plot_diag=False
 ):
     """Fits the sensitivity function using a standard star.
 
@@ -322,9 +322,9 @@ def fit_sensfunc(
         If ``True``, negative fluxes are masked out.
     degree: float, default ``5``
         Degree of the polynomial
-    xmin: float, default ``3600``
+    wmin: float, default ``3600``
         Minimum wavelength to use.
-    xmax: float, default ``None``
+    wmax: float, default ``None``
         Maximum wavelength to use.
     plot_diag: bool, default ``False``
         If ``True``, diagnostic plots are shown with the solution.
@@ -355,10 +355,10 @@ def fit_sensfunc(
     wave_max = calspec.wave.values.max()
     wave_mask = (wave_min <= cal_wave) & (cal_wave <= wave_max)
 
-    if xmin is not None:
-        wave_mask = wave_mask & (xmin <= cal_wave)
-    if xmax is not None:
-        wave_mask = wave_mask & (cal_wave <= xmax)
+    if wmin is not None:
+        wave_mask = wave_mask & (wmin <= cal_wave)
+    if wmax is not None:
+        wave_mask = wave_mask & (cal_wave <= wmax)
 
     cal_wave = cal_wave[wave_mask]
     raw_flux = raw_flux[wave_mask]
