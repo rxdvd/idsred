@@ -22,7 +22,6 @@ setuptools.setup(
     long_description_content_type="text/markdown",
     url="https://github.com/temuller/idsred",
     packages=setuptools.find_packages(),
-    # scripts=["bin/hostphot"],
     python_requires=">=3.8",
     classifiers=[
         "Programming Language :: Python :: 3",

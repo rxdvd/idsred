@@ -3,6 +3,11 @@
 This is a spectroscopic data-reduction pipeline for the Isaac Newton Telescope (INT) Intermediate Dispersion Spectrograph (IDS) instrument. 
 It is optimised for the blue detector (EEV10).
 
+[![repo](https://img.shields.io/badge/GitHub-temuller%2Fidsred-blue.svg?style=flat)](https://github.com/temuller/idsred)
+[![license](http://img.shields.io/badge/license-MIT-blue.svg?style=flat)](https://github.com/temuller/idsred/blob/master/LICENSE)
+![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue)
+[![PyPI](https://img.shields.io/pypi/v/idsred?label=PyPI&logo=pypi&logoColor=white)](https://pypi.org/project/idsred/)
+
 ## Installation
 
 It is recommended to install it on an anaconda environment:
@@ -12,7 +17,7 @@ conda create -n idsred pip
 conda activate idsred
 ```
 
-and install it using pip (NOT AVAILABLE YET):
+and install it using pip:
 
 ```code
 pip install "idsred"

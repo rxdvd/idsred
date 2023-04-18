@@ -1,0 +1,4 @@
+include requirements.txt
+graft hostphot/extinction/
+graft hostphot/lamps/
+graft hostphot/standards/

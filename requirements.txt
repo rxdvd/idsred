@@ -6,4 +6,3 @@ ccdproc
 specutils
 python-dotenv
 scipy
-lmfit
