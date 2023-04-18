@@ -1,6 +1,7 @@
 # ING-IDS lamps: https://www.ing.iac.es/astronomy/instruments/ids/wavelength_calibration.html
 
 import os
+import glob
 import numpy as np
 import matplotlib.pyplot as plt
 from dotenv import dotenv_values
@@ -21,7 +22,7 @@ from astropy.utils.exceptions import AstropyWarning
 import idsred
 
 idsred_path = idsred.__path__[0]
-
+XMIN, XMAX = 1172.67, 3597.24  # ad-hoc values used for the initial solution
 ################
 # ARC spectrum #
 ################
@@ -202,8 +203,7 @@ def find_arc_peaks(data, plot_solution=False, plot_diag=False):
     )
 
     # saturation mask / maximum line intensity
-    #sat_mask = arc_peaks < 64000
-    sat_mask = arc_peaks < 70000
+    sat_mask = arc_peaks < 64000
     arc_pixels = arc_pixels[sat_mask]
     arc_peaks = arc_peaks[sat_mask]
     offsets = offsets[sat_mask]
@@ -232,29 +232,28 @@ def find_arc_peaks(data, plot_solution=False, plot_diag=False):
         ax.legend()
         plt.show()
 
-        # zoom-in plots
-        cut = 1940
-        xmin = 1000
-        xmax = 3750
+        zoom_in_plots = False
+        if zoom_in_plots is True:
+            cut = 1840  # this value can change quite a bit
+            xmin = 1000
+            xmax = 3750
 
-        blue_profile = arc_profile[xmin:cut]
-        blue_columns = np.arange(xmin, cut)
-        red_profile = arc_profile[cut:xmax]
-        red_columns = np.arange(cut, xmax)
+            blue_profile = arc_profile[xmin:cut]
+            blue_columns = np.arange(xmin, cut)
+            red_profile = arc_profile[cut:xmax]
+            red_columns = np.arange(cut, xmax)
 
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(blue_columns, blue_profile)
-        ax.set_ylabel("Intensity", fontsize=16)
-        ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
-        ax.legend()
-        plt.show()
+            fig, ax = plt.subplots(figsize=(12, 4))
+            ax.plot(blue_columns, blue_profile)
+            ax.set_ylabel("Intensity", fontsize=16)
+            ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
+            plt.show()
 
-        fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(red_columns, red_profile)
-        ax.set_ylabel("Intensity", fontsize=16)
-        ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
-        ax.legend()
-        plt.show()
+            fig, ax = plt.subplots(figsize=(12, 4))
+            ax.plot(red_columns, red_profile)
+            ax.set_ylabel("Intensity", fontsize=16)
+            ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
+            plt.show()
 
     return arc_pixels, arc_peaks, arc_sigmas
 
@@ -385,8 +384,6 @@ def _chi_sq(
     arc_pixels,
     lamp_wave,
     func="legendre",
-    xmin=None,
-    xmax=None,
 ):
     """Chi squared for the wavelength solution.
 
@@ -406,7 +403,8 @@ def _chi_sq(
     chi: float
         Chi squared value.
     """
-    xmin, xmax = 1274.7568, 3699.0979  # ad-hoc values used for the initial solution
+    global XMIN, XMAX
+    xmin, xmax = XMIN, XMAX
     model_wave = wavelength_function(params, arc_pixels, func, xmin, xmax)
     ids_lamp, ids_model = _find_nearest(lamp_wave, model_wave)
     residual = model_wave[ids_model] - lamp_wave[ids_lamp]
@@ -416,7 +414,7 @@ def _chi_sq(
     # check if the function monotonically increases
     edges_pixels = np.array([0, 1, 4999, 5000])
     check_wave = wavelength_function(params, edges_pixels, func, xmin, xmax)
-    if (check_wave[0]>check_wave[1]) or (check_wave[-2]>check_wave[-1]):
+    if (check_wave[0] > check_wave[1]) or (check_wave[-2] > check_wave[-1]):
         # blow up the residual
         return 1e6
 
@@ -439,9 +437,9 @@ def _prepare_params(params):
     parameters = Parameters()
     for i, value in enumerate(params):
         if i == 0:
-            min_val, max_val = 5000, 8000
+            min_val, max_val = 6000, 7500
         elif i == 1:
-            min_val, max_val = 1500, 3000
+            min_val, max_val = 1800, 2600
         else:
             min_val, max_val = -50, 50
         parameters.add(f"c{i}", value=value, min=min_val, max=max_val)
@@ -450,17 +448,18 @@ def _prepare_params(params):
 
 
 def quick_wavelength_solution(
-        arc_pixels,
-        lamp_wave,
-        func="legendre",
-        k=3,
-        params=None,
-        niter=3,
-        sigclip=3,
-        plot_solution=False,
-        data=None,
-        sol_pixels=None,
-        sol_waves=None,
+    arc_pixels,
+    lamp_wave,
+    func="legendre",
+    k=3,
+    params=None,
+    niter=3,
+    sigclip=3,
+    plot_solution=False,
+    data=None,
+    sol_pixels=None,
+    sol_waves=None,
+    outfile="wavesol.txt",
 ):
     """Finds a wavelength solution with a simple fit.
 
@@ -492,28 +491,24 @@ def quick_wavelength_solution(
     sol_waves: array, default ``None``
         Center of the emission lines in wavelength units for an initial
         wavelength solution. If ``None``, a precomputed solution is used.
-
-    Returns
-    -------
-    params: array-like
-        Parameters for the wavelength-solution function.
+    outfile: str, default ``wavesol.txt``
+        Name of the file where the wavelength solution is saved.
     """
     if params is None:
-        params = [6848.45334, 2267.76127] + (k - 1) * [0]
-    method = 'nelder'  # for minimisation with lmfit
+        params = [6848.4117, 2267.754] + (k - 1) * [0]
+    method = "nelder"  # for minimisation with lmfit
 
     arc_pixels0 = np.copy(arc_pixels)
     # xmin, xmax = arc_pixels0.min(), arc_pixels0.max()
-    xmin, xmax = 1274.7568, 3699.0979
+    global XMIN, XMAX
+    xmin, xmax = XMIN, XMAX
 
     if sol_pixels is None or sol_waves is None:
         # use initial solution provided by the pipeline
-        wavesol_file = os.path.join(idsred_path, 'lamps', 'init_wavesol.txt')
+        wavesol_file = os.path.join(idsred_path, "lamps", "init_wavesol.txt")
         sol_pixels, sol_waves = np.loadtxt(wavesol_file).T
         # else use manual identification provided by the user
 
-    #pixels = np.array([1712, 1955, 2048, 2213, 2304, 2530])
-    #waves = np.array([5400.2, 5852.5, 6030, 6334.4, 6506.5, 6929.5])
     init_pixels = np.zeros_like(sol_pixels)
     for i, pix in enumerate(sol_pixels):
         ids_lamp, _ = _find_nearest(arc_pixels, np.array([pix]))
@@ -523,19 +518,19 @@ def quick_wavelength_solution(
     fitter = Minimizer(
         _chi_sq,
         parameters,
-        fcn_args=(init_pixels, sol_waves, func, xmin, xmax),
+        fcn_args=(init_pixels, sol_waves, func),
     )
     result = fitter.minimize(method=method)
     params = [result.params[key].value for key in result.params]
 
     # iterate fit with sigma clipping
     if niter > 0:
-        for i in range(niter):
+        for _ in range(niter):
             parameters = _prepare_params(params)
             fitter = Minimizer(
                 _chi_sq,
                 parameters,
-                fcn_args=(arc_pixels0, lamp_wave, func, xmin, xmax),
+                fcn_args=(arc_pixels0, lamp_wave, func),
             )
             result = fitter.minimize(method=method)
             params = [result.params[key].value for key in result.params]
@@ -554,7 +549,7 @@ def quick_wavelength_solution(
     fitter = Minimizer(
         _chi_sq,
         parameters,
-        fcn_args=(arc_pixels0, lamp_wave, func, xmin, xmax),
+        fcn_args=(arc_pixels0, lamp_wave, func),
     )
     result = fitter.minimize(method=method)
     params = [result.params[key].value for key in result.params]
@@ -567,9 +562,8 @@ def quick_wavelength_solution(
             params, arc_pixels, lamp_wave, outliers_mask, data, func
         )
 
-    save_wavesol(func, xmin, xmax, params)
+    save_wavesol(func, xmin, xmax, params, outfile)
 
-    return params
 
 # Checking output
 
@@ -595,8 +589,8 @@ def check_solution(
         Function used to fit the wavelength solution.
         Either ``chebyshev`` or ``legendre``.
     """
-    #xmin, xmax = arc_pixels.min(), arc_pixels.max()
-    xmin, xmax = 1274.7568, 3699.0979
+    global XMIN, XMAX
+    xmin, xmax = XMIN, XMAX
 
     calibrated_wave = wavelength_function(params, arc_pixels, func, xmin, xmax)
     ids_lamp, ids_calwave = _find_nearest(lamp_wave, calibrated_wave)
@@ -675,14 +669,18 @@ def check_solution(
         masked_calibrated_wave = wavelength_function(
             params, arc_pixels[~mask], func, xmin, xmax
         )
-        ids_lamp, ids_calwave = _find_nearest(lamp_wave, masked_calibrated_wave)
+        ids_lamp, ids_calwave = _find_nearest(
+            lamp_wave, masked_calibrated_wave
+        )
         masked_res = masked_calibrated_wave[ids_calwave] - lamp_wave[ids_lamp]
         mean, std = masked_res.mean(), masked_res.std()
 
         masked_calibrated_wave = wavelength_function(
             params, arc_pixels[mask], func, xmin, xmax
         )
-        ids_lamp, ids_calwave = _find_nearest(lamp_wave, masked_calibrated_wave)
+        ids_lamp, ids_calwave = _find_nearest(
+            lamp_wave, masked_calibrated_wave
+        )
         masked_res = masked_calibrated_wave[ids_calwave] - lamp_wave[ids_lamp]
         n_out = len(calibrated_wave[ids_calwave])
 
@@ -707,10 +705,10 @@ def check_solution(
     axes[i + 1].set_xlabel(r"Wavelength ($\AA$)", fontsize=16)
     axes[i + 1].set_ylim(mean - 3 * std, mean + 3 * std)
 
-    axes[0].set_title(f"Residual: {mean:.2f} $+/-$ {std:.2f}"+r" $\AA$", fontsize=16)
+    axes[0].set_title(
+        f"Residual: {mean:.2f} $+/-$ {std:.2f}" + r" $\AA$", fontsize=16
+    )
     plt.show()
-
-
 
 
 def find_wavesol(
@@ -764,7 +762,7 @@ def find_wavesol(
     arc_pixels, arc_peaks, arc_sigmas = find_arc_peaks(
         data, plot_solution=True, plot_diag=False
     )
-    start, step = 0, 2
+    start, step = 0, 1
     arc_pixels, arc_peaks, arc_sigmas = (
         arc_pixels[start::step],
         arc_peaks[start::step],
@@ -774,6 +772,7 @@ def find_wavesol(
     global idsred_path
     lamp_file = os.path.join(idsred_path, "lamps/CuArNe_low.dat")
     lamp_wave = np.loadtxt(lamp_file).T
+    print("Finding the wavelength solution for the master ARC...")
     quick_wavelength_solution(
         arc_pixels,
         lamp_wave,
@@ -786,10 +785,48 @@ def find_wavesol(
         data=data,
         sol_pixels=sol_pixels,
         sol_waves=sol_waves,
+        outfile="wavesol.txt",
     )
 
+    # repeat above steps for each target's arc
+    arc_files = glob.glob(os.path.join(PROCESSING, "arc_*.fits"))
+    for arc_file in arc_files:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", AstropyWarning)
+            arc_ccd = CCDData.read(arc_file)
 
-def save_wavesol(func, xmin, xmax, coefs):
+        arc_name = arc_ccd.header["OBJECT"]
+        target_name = arc_name.split("ARC_")[1]
+
+        # fit and extract peak of the arc lamps
+        data = arc_ccd.data.T
+        arc_pixels, arc_peaks, arc_sigmas = find_arc_peaks(
+            data, plot_solution=True, plot_diag=False
+        )
+        arc_pixels, arc_peaks, arc_sigmas = (
+            arc_pixels[start::step],
+            arc_peaks[start::step],
+            arc_sigmas[start::step],
+        )
+
+        print(f"Finding the wavelength solution for {target_name}'s ARC...")
+        quick_wavelength_solution(
+            arc_pixels,
+            lamp_wave,
+            func=func,
+            k=k,
+            params=coefs,
+            niter=niter,
+            sigclip=sigclip,
+            plot_solution=plot_solution,
+            data=data,
+            sol_pixels=sol_pixels,
+            sol_waves=sol_waves,
+            outfile=f"wavesol_{target_name}.txt",
+        )
+
+
+def save_wavesol(func, xmin, xmax, coefs, outfile):
     """Saves the output of the wavelength solution.
 
     Parameters
@@ -804,10 +841,12 @@ def save_wavesol(func, xmin, xmax, coefs):
     coefs: array-like
         Initial guess for the parameters for the
         wavelength-solution function. Tuple, e.g. (4500, 0.5, 0, 0).
+    outfile: str
+        Name of the output file.
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
-    wavesol_file = os.path.join(PROCESSING, "wavesol.txt")
+    wavesol_file = os.path.join(PROCESSING, outfile)
 
     with open(wavesol_file, "w") as file:
         file.write(f"function: {func}\n")
@@ -816,14 +855,19 @@ def save_wavesol(func, xmin, xmax, coefs):
         file.write(f"coefficients: {coefs_str}\n")
 
 
-def load_wavesol():
+def load_wavesol(inputfile):
     """Loads the wavelength solution.
 
     The solution has to be computed first.
+
+    Parameters
+    ----------
+    inputfile: str
+        Name of the file with the wavelength solution
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
-    wavesol_file = os.path.join(PROCESSING, "wavesol.txt")
+    wavesol_file = os.path.join(PROCESSING, inputfile)
 
     with open(wavesol_file, "r") as file:
         lines = file.read().splitlines()
@@ -837,20 +881,22 @@ def load_wavesol():
     return func, xmin, xmax, coefs
 
 
-def apply_wavesol(xdata):
+def apply_wavesol(xdata, wavesol_file):
     """Applies the wavelength solution to an array.
 
     Parameters
     ----------
     xdata: array
         Values in pixel units.
+    wavesol_file: str
+        File with the wavelength solution
 
     Returns
     -------
     wavelengths: array
         Calibrated wavelengths.
     """
-    func, xmin, xmax, coefs = load_wavesol()
+    func, xmin, xmax, coefs = load_wavesol(wavesol_file)
     wavelengths = wavelength_function(coefs, xdata, func, xmin, xmax)
 
     return wavelengths

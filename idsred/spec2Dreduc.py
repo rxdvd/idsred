@@ -4,6 +4,7 @@ from dotenv import dotenv_values
 
 import astropy.units as u
 from astropy.io import fits
+from astropy.time import Time
 from astropy.stats import mad_std
 
 import ccdproc
@@ -38,7 +39,7 @@ def _validate_method(method):
 def create_images_list(
     observations,
     obstype,
-    subtract_overscan=True,
+    subtract_overscan=False,
     trim_image=True,
     master_bias=None,
 ):
@@ -52,7 +53,7 @@ def create_images_list(
         Table-like object with images information.
     obstype: str
         Type of Image. E.g. ``BIAS``, ``FLAT``.
-    subtract_overscan: bool, default ``True``.
+    subtract_overscan: bool, default ``False``.
         If ``True``, the image gets overscan subtract.
     trim_image: bool, default ``True``.
         If ``True``, the image gets trimmed.
@@ -74,16 +75,16 @@ def create_images_list(
             # initial data on first extension
             ccd = CCDData.read(filename, hdu=1, unit=u.electron)
 
-        if subtract_overscan:
+        if subtract_overscan is True:
             ccd = ccdproc.subtract_overscan(
                 ccd,
                 median=True,
                 overscan_axis=0,
                 fits_section=ccd.header["BIASSEC"],
             )
-        if trim_image:
+        if trim_image is True:
             ccd = ccdproc.trim_image(ccd, ccd.header["TRIMSEC"])
-            #ccd = ccdproc.trim_image(ccd[360:3601, :])
+            # ccd = ccdproc.trim_image(ccd[360:3601, :])
         if master_bias is not None:
             ccd = ccdproc.subtract_bias(ccd, master_bias)
         images_list.append(ccd)
@@ -128,13 +129,15 @@ def combine_images(images_list, method="average", scale=None):
             signma_clip_dev_func=mad_std,
             mem_limit=350e6,
         )
+    else:
+        raise ValueError("Not a valid method:", method)
 
     return master_image
 
 
 def create_master_bias(
     observations,
-    subtract_overscan=True,
+    subtract_overscan=False,
     trim_image=True,
     method="average",
     save_output=True,
@@ -145,15 +148,12 @@ def create_master_bias(
     ----------
     observations: `~ImageFileCollection`
         Table-like object with images information.
-    subtract_overscan: bool, default ``True``.
+    subtract_overscan: bool, default ``False``.
         If ``True``, the image gets overscan subtract.
     trim_image: bool, default ``True``.
         If ``True``, the image gets trimmed.
     method: str, default ``average``
         Method for combining images: ``median`` or ``average``.
-    proc_dir: bool, default ``None``
-        Processing directory (where the output are saved). If ``None``, the current
-        directory is used.
     save_output: bool, default ``True``
         If ``True``, the master flat image is saved in the processing directory.
 
@@ -167,10 +167,10 @@ def create_master_bias(
         observations, obstype, subtract_overscan, trim_image
     )
     master_bias = combine_images(bias_list, method)
-    master_bias.header['OBJECT'] = 'MASTER_BIAS'
+    master_bias.header["OBJECT"] = "MASTER_BIAS"
     print(f"{len(bias_list)} images combined for the master BIAS")
 
-    if save_output:
+    if save_output is True:
         config = dotenv_values(".env")
         PROCESSING = config["PROCESSING"]
         outfile = os.path.join(PROCESSING, "master_bias.fits")
@@ -195,11 +195,14 @@ def correct_flat(flat):
     master_flat: array
         Corrected master flat.
     """
-    avcol_in = np.average(flat[:, 30:306].copy(), axis=1)  # average column value, avoiding edges
+    avcol_in = np.average(
+        flat[:, 30:306].copy(), axis=1
+    )  # average column value, avoiding edges
     avcol_out = np.concatenate([[avcol_in]] * flat.shape[1], axis=0).T
     master_flat = np.copy(flat / avcol_out)
 
     return master_flat
+
 
 def create_master_flat(
     observations,
@@ -224,7 +227,7 @@ def create_master_flat(
     trim_image: bool, default ``True``.
         If ``True``, the image gets trimmed.
     method: str, default ``average``
-        Method for conbining images: ``median`` or ``average``.
+        Method for combining images: ``median`` or ``average``.
     scale_flats: bool, default ``True``
         If ``True``, the flats are scaled by the inverse median before being combined.
     save_output: bool, default ``True``
@@ -244,14 +247,16 @@ def create_master_flat(
     flat_list = create_images_list(
         observations, obstype, subtract_overscan, trim_image, master_bias
     )
+    for flat in flat_list:
+        flat.data[flat.data <= 0] = 100
     master_flat = combine_images(flat_list, method, scale=scale)
-    master_flat.header['OBJECT'] = 'MASTER_FLAT'
+    master_flat.header["OBJECT"] = "MASTER_FLAT"
     print(f"{len(flat_list)} images combined for the master FLAT")
 
     if corr_flat is True:
         master_flat.data = correct_flat(master_flat)
 
-    if save_output:
+    if save_output is True:
         config = dotenv_values(".env")
         PROCESSING = config["PROCESSING"]
         outfile = os.path.join(PROCESSING, "master_flat.fits")
@@ -262,10 +267,65 @@ def create_master_flat(
     return master_flat
 
 
+def extract_arcs(observations, method="average", trim_image=True):
+    """Obtains the ARC files closest in time to each of the targets.
+
+    Parameters
+    ----------
+    observations: `~ImageFileCollection`
+        Table-like object with images information.
+    method: str, default ``average``
+        Method for combining images: ``median`` or ``average``.
+    trim_image: bool, default ``True``.
+        If ``True``, the image gets trimmed.
+    """
+    config = dotenv_values(".env")
+    PROCESSING = config["PROCESSING"]
+
+    obs_df = observations.summary.to_pandas()
+
+    # get the mid MJD of each file
+    times = obs_df["date-obs"].values + "T" + obs_df["ut-mid"].values
+    times = Time(list(times), format="isot", scale="utc")
+    obs_df["mid_mjd"] = times.mjd
+
+    targets_df = obs_df[obs_df.obstype == "TARGET"]
+    arc_df = obs_df[obs_df.obstype == "ARC"]
+
+    # get the closest arc in time for each target
+    for row in targets_df.iterrows():
+        dt = np.abs(row[1].mid_mjd - arc_df.mid_mjd.values)
+        arc_id = np.argmin(dt)
+        arc_file = os.path.join(PROCESSING, "..", arc_df.file.values[arc_id])
+
+        # update header
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", AstropyWarning)
+            target_name = row[1].object
+            arc_ccd = CCDData.read(arc_file, hdu=1, unit=u.electron)
+            arc_ccd.header["OBJECT"] = f"ARC_{target_name}"
+            arc_ccd = combine_images([arc_ccd], method=method)
+
+            if trim_image is True:
+                arc_ccd = ccdproc.trim_image(
+                    arc_ccd, arc_ccd.header["TRIMSEC"]
+                )
+
+        # save output
+        outfile = os.path.join(PROCESSING, f"arc_{target_name}.fits")
+        arc_ccd.write(outfile, overwrite=True)
+
+
 def create_master_arc(
-    observations, beginning=True, method="average", save_output=True
+    observations,
+    beginning=True,
+    method="average",
+    trim_image=True,
+    save_output=True,
 ):
     """Creates a master bias image.
+
+    ARC files closest in time to each of the targets are also extracted.
 
     Parameters
     ----------
@@ -275,6 +335,8 @@ def create_master_arc(
         If ``True``, the arcs from the beginning of the night are used.
     method: str, default ``average``
         Method for combining images: ``median`` or ``average``.
+    trim_image: bool, default ``True``.
+        If ``True``, the image gets trimmed.
     save_output: bool, default ``True``
         If ``True``, the master flat image is saved in the processing directory.
 
@@ -283,6 +345,14 @@ def create_master_arc(
     master_arc: `~astropy.nddata.CCDData`
         Master arc image.
     """
+    config = dotenv_values(".env")
+    PROCESSING = config["PROCESSING"]
+    if not os.path.isdir(PROCESSING):
+        os.mkdir(PROCESSING)
+
+    extract_arcs(observations, method=method, trim_image=trim_image)
+    print("extraction of ARC files for each of the targets successful")
+
     obstype = "ARC"
     obs_files = observations.filter(obstype=obstype).files
     if not beginning:
@@ -312,18 +382,17 @@ def create_master_arc(
         )
 
     arc_list = create_images_list(
-        arc_observations, obstype, subtract_overscan=False, trim_image=False
+        arc_observations,
+        obstype,
+        subtract_overscan=False,
+        trim_image=trim_image,
     )
     master_arc = combine_images(arc_list, method)
-    master_arc.header['OBJECT'] = 'MASTER_ARC'
+    master_arc.header["OBJECT"] = "MASTER_ARC"
     print(f"{len(arc_list)} images combined for the master ARC")
 
-    if save_output:
-        config = dotenv_values(".env")
-        PROCESSING = config["PROCESSING"]
+    if save_output is True:
         outfile = os.path.join(PROCESSING, "master_arc.fits")
-        if not os.path.isdir(PROCESSING):
-            os.mkdir(PROCESSING)
         master_arc.write(outfile, overwrite=True)
 
     return master_arc
@@ -348,12 +417,14 @@ def reduce_images(
         Table-like object with images information.
     master_bias: `~astropy.nddata.CCDData`-like, array-like or None, optional
         Master bias image. If given, images are bias subtracted.
+    master_flat: `~astropy.nddata.CCDData`-like, array-like or None, optional
+        Master flat image. If given, images are flat-fielded.
     subtract_overscan: bool, default ``True``.
         If ``True``, the image gets overscan subtract.
     trim_image: bool, default ``True``.
         If ``True``, the image gets trimmed.
     method: str, default ``average``
-        Method for conbining images: ``median`` or ``average``.
+        Method for combining images: ``median`` or ``average``.
     save_output: bool, default ``True``
         If ``True``, the science images are saved in the processing directory.
 
@@ -384,32 +455,27 @@ def reduce_images(
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore", AstropyWarning)
                 ccd = CCDData(hdu[1].data, header=header, unit=u.electron)
-            """
-            ccd = ccdproc.create_deviation(
-                ccd,
-                gain=ccd.header["GAIN"] * u.electron / u.adu,
-                readnoise=ccd.header["READNOIS"] * u.electron,
-            )
-            ccd = ccdproc.gain_correct(
-                ccd, ccd.header["GAIN"] * u.electron / u.adu
-            )
-            """
+
             try:
-                ccd = ccdproc.cosmicray_lacosmic(ccd, niter=10, sigfrac=0.3, psffwhm=2.5)
-                if subtract_overscan:
+                ccd = ccdproc.cosmicray_lacosmic(
+                    ccd, niter=10, sigfrac=0.3, psffwhm=2.5
+                )
+                if subtract_overscan is True:
                     ccd = ccdproc.subtract_overscan(
                         ccd,
                         median=True,
                         overscan_axis=0,
                         fits_section=ccd.header["BIASSEC"],
                     )
-                if trim_image:
+                if trim_image is True:
                     ccd = ccdproc.trim_image(ccd, ccd.header["TRIMSEC"])
-                    #ccd = ccdproc.trim_image(ccd[360:3601, :])
+                    # ccd = ccdproc.trim_image(ccd[360:3601, :])
                 if master_bias is not None:
                     ccd = ccdproc.subtract_bias(ccd, master_bias)
                 if master_flat is not None:
-                    ccd = ccdproc.flat_correct(ccd, master_flat, min_value=0.01)
+                    ccd = ccdproc.flat_correct(
+                        ccd, master_flat, min_value=0.01
+                    )
 
                 # Rotate Frame
                 ccd.data = ccd.data.T
@@ -425,11 +491,13 @@ def reduce_images(
                 red_target = combiner.average_combine()
             elif method == "median":
                 red_target = combiner.median_combine()
+            else:
+                raise ValueError("Not a valid method:", method)
 
             red_hdu = red_target.to_hdu()
             update_header(red_hdu, master_header)
 
-            if save_output:
+            if save_output is True:
                 config = dotenv_values(".env")
                 PROCESSING = config["PROCESSING"]
                 outfile = os.path.join(PROCESSING, f"{object_name}_2d.fits")
@@ -444,10 +512,11 @@ def reduce_images(
 
 def quick_2Dreduction(
     observations=None,
-    subtract_overscan=True,
+    subtract_overscan=False,
     trim_image=True,
     method="average",
-    corr_flat=True
+    scale_flats=True,
+    corr_flat=True,
 ):
     """Performs a "quick" 2D image reduction.
 
@@ -467,18 +536,29 @@ def quick_2Dreduction(
     if observations is None:
         observations = collect_data()
 
-    create_master_arc(observations, beginning=True, method=method)
+    create_master_arc(
+        observations, beginning=True, method=method, trim_image=trim_image
+    )
     master_bias = create_master_bias(
-        observations, subtract_overscan=False, trim_image=True, method=method
+        observations,
+        subtract_overscan=subtract_overscan,
+        trim_image=trim_image,
+        method=method,
     )
     master_flat = create_master_flat(
-        observations, master_bias, subtract_overscan=False, trim_image=True, method=method, corr_flat=corr_flat
+        observations,
+        master_bias,
+        subtract_overscan=subtract_overscan,
+        trim_image=trim_image,
+        method=method,
+        scale_flats=scale_flats,
+        corr_flat=corr_flat,
     )
     _ = reduce_images(
         observations,
         master_bias,
         master_flat,
-        subtract_overscan=False,
-        trim_image=True,
+        subtract_overscan=subtract_overscan,
+        trim_image=trim_image,
         method=method,
     )

@@ -242,11 +242,19 @@ def optimised_trace(
                 fig, ax = plt.subplots(figsize=(12, 6))
                 ax.plot(ys, profile, label="data")
                 ax.plot(ys, model, label="model")
-                ax.axvline(ycenter[icol] + ywidth[icol], c="r", ls="dotted",
-                    label="aperture")
+                ax.axvline(
+                    ycenter[icol] + ywidth[icol],
+                    c="r",
+                    ls="dotted",
+                    label="aperture",
+                )
                 ax.axvline(ycenter[icol] - ywidth[icol], c="r", ls="dotted")
-                ax.axvline(ycenter[icol] + bkg_width[icol], c="g", ls="dotted",
-                           label="background")
+                ax.axvline(
+                    ycenter[icol] + bkg_width[icol],
+                    c="g",
+                    ls="dotted",
+                    label="background",
+                )
                 ax.axvline(ycenter[icol] - bkg_width[icol], c="g", ls="dotted")
                 ax.set_xlabel("Dispersion axis (pixels)", fontsize=16)
                 ax.set_ylabel("Median Counts", fontsize=16)
@@ -315,8 +323,10 @@ def optimised_trace(
         ax = plot_image(hdu)
         ax.plot(xs, trace_top, c="r", lw=1)
         ax.plot(xs, trace_bottom, c="r")
-        ax.fill_between(xs, bkg_top, bkg_top+sky_width, color="g", alpha=0.5)
-        ax.fill_between(xs, bkg_bottom, bkg_bottom-sky_width, color="g", alpha=0.5)
+        ax.fill_between(xs, bkg_top, bkg_top + sky_width, color="g", alpha=0.5)
+        ax.fill_between(
+            xs, bkg_bottom, bkg_bottom - sky_width, color="g", alpha=0.5
+        )
         ax.set_xlim(xmin, xmax)
         ax.set_ylim(ymin, ymax)
         plt.show()
@@ -325,42 +335,66 @@ def optimised_trace(
         fig, axes = plt.subplots(1, 2, figsize=(14, 6))
         # zoom-in first
         m, s = np.nanmean(data), np.nanstd(data)
-        xmin, xmax = xmax//2-300, xmax//2+300
+        xmin, xmax = xmax // 2 - 300, xmax // 2 + 300
 
-        im = axes[0].imshow(data,
-                            interpolation="nearest",
-                            cmap="gray",
-                            vmin=m - s,
-                            vmax=m + s,
-                            origin="lower",
+        im = axes[0].imshow(
+            data,
+            interpolation="nearest",
+            cmap="gray",
+            vmin=m - s,
+            vmax=m + s,
+            origin="lower",
         )
         fig.colorbar(im, ax=axes[0], fraction=0.046, pad=0.04)
         axes[0].set_title(header["OBJECT"], fontsize=16)
         axes[0].plot(xs, trace_top, c="r", lw=1, label="aperture")
         axes[0].plot(xs, trace_bottom, c="r")
-        axes[0].fill_between(xs, bkg_top, bkg_top + sky_width, color="g", alpha=0.5, label="background")
-        axes[0].fill_between(xs, bkg_bottom, bkg_bottom - sky_width, color="g", alpha=0.5)
+        axes[0].fill_between(
+            xs,
+            bkg_top,
+            bkg_top + sky_width,
+            color="g",
+            alpha=0.5,
+            label="background",
+        )
+        axes[0].fill_between(
+            xs, bkg_bottom, bkg_bottom - sky_width, color="g", alpha=0.5
+        )
         axes[0].set_xlim(xmin, xmax)
         axes[0].set_ylim(ymin, ymax)
         axes[0].legend(fontsize=16)
 
         # slice plot
-        index = (xmin+xmax)//2
+        index = (xmin + xmax) // 2
         slice = data[:, index]
         cols = np.arange(ymax)
         axes[1].plot(cols, slice, c="k", lw=2)  # trace profile
         axes[1].axvline(trace_top[index], c="r", lw=1)
         axes[1].axvline(trace_bottom[index], c="r", lw=1)
 
-        y_bkg = np.arange(slice.min()*0.9, slice.max()*1.1)
-        axes[1].fill_betweenx(y_bkg, bkg_top[index], bkg_top[index] + sky_width, color="g", alpha=0.5)
-        axes[1].fill_betweenx(y_bkg, bkg_bottom[index], bkg_bottom[index] - sky_width, color="g", alpha=0.5)
-        axes[1].set_xlim(bkg_bottom[index] - sky_width - 30, bkg_top[index] + sky_width + 30)
-        axes[1].set_ylim(None, slice.max()*1.1)
+        y_bkg = np.arange(slice.min() * 0.9, slice.max() * 1.1)
+        axes[1].fill_betweenx(
+            y_bkg,
+            bkg_top[index],
+            bkg_top[index] + sky_width,
+            color="g",
+            alpha=0.5,
+        )
+        axes[1].fill_betweenx(
+            y_bkg,
+            bkg_bottom[index],
+            bkg_bottom[index] - sky_width,
+            color="g",
+            alpha=0.5,
+        )
+        axes[1].set_xlim(
+            bkg_bottom[index] - sky_width - 30, bkg_top[index] + sky_width + 30
+        )
+        axes[1].set_ylim(None, slice.max() * 1.1)
 
-        #bkg = (np.nanmedian(slice[int(bkg_top[index]):int(bkg_top[index]) + sky_width]) +
+        # bkg = (np.nanmedian(slice[int(bkg_top[index]):int(bkg_top[index]) + sky_width]) +
         #       np.nanmedian(slice[int(bkg_bottom[index]) - sky_width:int(bkg_top[index])] ) )/2
-        #axes[2].plot(cols, slice-bkg, c="k", lw=2)
+        # axes[2].plot(cols, slice-bkg, c="k", lw=2)
 
         plt.show()
 
@@ -373,10 +407,10 @@ def optimised_trace(
         # estimate background:
         # take average of the sky at both sides of the aperture
         imin = int(bkg_bottom[i])
-        sky_bottom = np.nanmedian(data[imin-sky_width:imin, i])
+        sky_bottom = np.nanmedian(data[imin - sky_width : imin, i])
         imax = int(bkg_top[i])
-        sky_top = np.nanmedian(data[imax:imax+sky_width, i])
-        bkg_sky = (sky_bottom+sky_top)/2
+        sky_top = np.nanmedian(data[imax : imax + sky_width, i])
+        bkg_sky = (sky_bottom + sky_top) / 2
         # background subtraction
         slice_data = data[imin_ap:imax_ap, i] - bkg_sky
 

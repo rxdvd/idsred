@@ -75,7 +75,7 @@ def plot_image(image):
             data = hdu[1].data
     except:
         data = image
-        header = {"OBJECT": ''}
+        header = {"OBJECT": ""}
 
     m, s = np.nanmean(data), np.nanstd(data)
 

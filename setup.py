@@ -30,6 +30,6 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     install_requires=requirements,
-    package_data={"idsred": ["lamps/*", "standards/*"]},
+    package_data={"idsred": ["lamps/*", "standards/*", "extinction/*"]},
     include_package_data=True,
 )

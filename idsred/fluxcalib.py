@@ -19,6 +19,7 @@ from specutils.manipulation import box_smooth
 from .wavecalib import apply_wavesol
 
 import idsred
+
 idsred_path = idsred.__path__[0]
 
 # List of extension for the standard stars from the ING catalog.
@@ -99,7 +100,12 @@ def get_std_file(std_name):
     with open(std_json_file, "r") as file:
         std_dict = json.load(file)
 
-    if std_name in std_dict.keys():
+    if not std_name.startswith("SP"):
+        # this is for non-ING standard stars (e.g. ESO STDs)
+        # name format should be fGD71.dat, where 'f' stands for flux
+        outfile = os.path.join(idsred_path, "standards", f"f{std_name}.dat")
+        return outfile
+    elif std_name in std_dict.keys():
         # check if the star already exists locally
         cat_name = std_dict[std_name]
         global std_extensions
@@ -127,8 +133,7 @@ def _find_skiprows(filename):
     with open(filename) as file:
         for i, line in enumerate(file.readlines()):
             if "*" in line:
-                skiprows = i
-    skiprows += 1
+                skiprows = i + 1
 
     return skiprows
 
@@ -153,7 +158,7 @@ def _convert_flux(calspec):
         flux_Jy = calspec["flux_mJy"].values * 1e-3  # mJy to Jy
         flux_nu = flux_Jy * 1e-23
 
-    flux_lam = flux_nu * (3e18) / (wave**2)
+    flux_lam = flux_nu * 3e18 / (wave**2)
     calspec["flux"] = flux_lam
 
 
@@ -172,19 +177,28 @@ def _get_calspec(std_name):
     """
     filename = get_std_file(std_name)
     skiprows = _find_skiprows(filename)
-    if (
+
+    if filename.endswith(".dat"):
+        # non-ING standards
+        columns = ["wave", "flux"]
+        needs_conversion = False
+    elif (
         filename.endswith("a.sto")
         or filename.endswith("a.og")
         or filename.endswith("a.oke")
     ):
         columns = ["wave", "mag"]
+        needs_conversion = True
+
     else:
         columns = ["wave", "flux_mJy"]
+        needs_conversion = True
 
     calspec = pd.read_csv(
         filename, delim_whitespace=True, skiprows=skiprows, names=columns
     )
-    _convert_flux(calspec)
+    if needs_conversion is True:
+        _convert_flux(calspec)
 
     return calspec
 
@@ -199,7 +213,7 @@ def plot_calspec(calspec, units="flux"):
     units: str, default ``flux``
         Either ``flux`` or ``mag``.
     """
-    if type(calspec)==str:
+    if type(calspec) == str:
         calspec = _get_calspec(calspec)
 
     fig, ax = plt.subplots(figsize=(12, 6))
@@ -217,7 +231,7 @@ def plot_calspec(calspec, units="flux"):
     plt.show()
 
 
-def get_standard(std_name, fmask=True):
+def get_standard(std_name, fmask=True, use_master_arc=False):
     """Gets the observed standard star SED.
 
     The SED is wavelength calibrated.
@@ -228,6 +242,10 @@ def get_standard(std_name, fmask=True):
         Standard star name. E.g. `SP0105+625`.
     fmask: bool, default ``True``
         If ``True``, negative fluxes are masked out.
+    use_master_arc: bool, default ``False``
+        If ``True``, the wavelength solution from the master ARC
+        is used instead of the target's specific solution.
+
 
     Returns
     -------
@@ -245,7 +263,11 @@ def get_standard(std_name, fmask=True):
     hdu = fits.open(obs_std_file)
     raw_flux = hdu[0].data
     cols = np.arange(len(raw_flux))
-    cal_wave = apply_wavesol(cols)
+    if use_master_arc is True:
+        wavesol_file = "wavesol.txt"
+    else:
+        wavesol_file = f"wavesol_{std_name}.txt"
+    cal_wave = apply_wavesol(cols, wavesol_file)
 
     if fmask:
         mask = raw_flux >= 0.0
@@ -272,7 +294,7 @@ def _calc_airmass(hdu):
     airmass: float
         Target's airmass.
     """
-    zenith = (hdu[0].header['ZDSTART'] + hdu[0].header['ZDEND']) / 2
+    zenith = (hdu[0].header["ZDSTART"] + hdu[0].header["ZDEND"]) / 2
     zenith_rad = zenith * np.pi / 180
     airmass = 1 / np.cos(zenith_rad)
 
@@ -296,8 +318,10 @@ def _correct_extinction(wave, flux, airmass):
     corr_flux: array
         Extinction-corrected flux.
     """
-    ext_path = os.path.join(idsred.__path__[0], 'extinction/lapalmaext.txt')
-    _wave, _ext_mag = np.loadtxt(ext_path).T  # _ext_mag in units of mag/airmass
+    ext_path = os.path.join(idsred.__path__[0], "extinction/lapalmaext.txt")
+    _wave, _ext_mag = np.loadtxt(
+        ext_path
+    ).T  # _ext_mag in units of mag/airmass
 
     _ext = 10 ** (_ext_mag * airmass)
     _ext = np.interp(wave, _wave, _ext)
@@ -306,8 +330,15 @@ def _correct_extinction(wave, flux, airmass):
 
     return corr_flux
 
+
 def fit_sensfunc(
-    std_name=None, fmask=True, degree=5, wmin=3600, wmax=None, plot_diag=False
+    std_name=None,
+    fmask=True,
+    degree=5,
+    wmin=3600,
+    wmax=None,
+    plot_diag=False,
+    use_master_arc=False,
 ):
     """Fits the sensitivity function using a standard star.
 
@@ -328,6 +359,9 @@ def fit_sensfunc(
         Maximum wavelength to use.
     plot_diag: bool, default ``False``
         If ``True``, diagnostic plots are shown with the solution.
+    use_master_arc: bool, default ``False``
+        If ``True``, the wavelength solution from the master ARC
+        is used instead of the target's specific solution.
     """
     config = dotenv_values(".env")
     PROCESSING = config["PROCESSING"]
@@ -339,7 +373,7 @@ def fit_sensfunc(
         std_name = basename.split("_")[0]
 
     # observed standard
-    cal_wave, raw_flux, std_hdu = get_standard(std_name, fmask)
+    cal_wave, raw_flux, std_hdu = get_standard(std_name, fmask, use_master_arc)
     # correct for atmospheric extinction at Observatorio Roque de Los Muchachos
     airmass = _calc_airmass(std_hdu)
     raw_flux = _correct_extinction(cal_wave, raw_flux, airmass)
@@ -364,15 +398,6 @@ def fit_sensfunc(
     raw_flux = raw_flux[wave_mask]
     interp_calflux = interp_calflux[wave_mask]
 
-    if plot_diag:
-        fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
-        ax[0].plot(cal_wave, raw_flux / raw_flux.max(), label="Obs. Spec.")
-        ax[0].plot(
-            cal_wave, interp_calflux / interp_calflux.max(), label="Cal. Spec."
-        )
-        ax[0].set_title(std_name, fontsize=16)
-        ax[0].legend(fontsize=14)
-
     # sensitivity function calculation starts here
     flux_ratio = interp_calflux / raw_flux
     log_ratio = np.log10(flux_ratio)
@@ -383,15 +408,24 @@ def fit_sensfunc(
 
     # calculate telluric correction
     tellurics = sensfunc / flux_ratio
-    mask = ((cal_wave > 6650) & (cal_wave < 6750)) | ((cal_wave > 7350) & (cal_wave < 7500))
+    mask = ((cal_wave > 6860) & (cal_wave < 6910)) | (
+        (cal_wave > 7570) & (cal_wave < 7680)
+    )
     tellurics[~mask] = 1
     tellurics[tellurics > 1] = 1
 
-    tellurics_file = os.path.join(PROCESSING,
-                                     "telluric_correction.txt")
-    np.savetxt(tellurics_file, np.array([cal_wave, tellurics]).T)
+    tellurics_file = os.path.join(PROCESSING, "telluric_correction.txt")
+    np.savetxt(tellurics_file, np.array([cal_wave, tellurics]).T, fmt="%.2f")
 
     if plot_diag:
+        fig, ax = plt.subplots(2, 1, figsize=(12, 6), sharex=True)
+        ax[0].plot(cal_wave, raw_flux / raw_flux.max(), label="Obs. Spec.")
+        ax[0].plot(
+            cal_wave, interp_calflux / interp_calflux.max(), label="Cal. Spec."
+        )
+        ax[0].set_title(std_name, fontsize=16)
+        ax[0].legend(fontsize=14)
+
         ax[1].plot(
             cal_wave, sensfunc, label=f"Sens. Func. (deg. {degree})", color="g"
         )
@@ -483,6 +517,7 @@ def apply_sensfunc(wavelength, raw_flux):
 
     return wavelength, flux
 
+
 def correct_tellurics(wavelength, flux):
     """Corrects for telluric absorptions.
 
@@ -504,11 +539,12 @@ def correct_tellurics(wavelength, flux):
     tell_wave, tellurics = np.loadtxt(tellurics_file).T
 
     tellurics = np.interp(wavelength, tell_wave, tellurics)
-    corr_flux = flux/tellurics
+    corr_flux = flux / tellurics
 
     return corr_flux
 
-def calibrate_spectra(smoothing=False):
+
+def calibrate_spectra(use_master_arc=False, smoothing=False):
     """Calibrates all the spectra in the working directory.
 
     The spectra are wavelength- and flux-calibrated, including
@@ -516,6 +552,9 @@ def calibrate_spectra(smoothing=False):
 
     Parameters
     ----------
+    use_master_arc: bool, default ``False``
+        If ``True``, the wavelength solution from the master ARC
+        is used instead of the target's specific solution.
     smoothing: bool, default ``False``
         If ``True``, the spectra is smoothed with a window
         of 5 angstrom.
@@ -532,8 +571,14 @@ def calibrate_spectra(smoothing=False):
         raw_flux = hdu[0].data
         raw_wave = np.arange(len(raw_flux))
 
+        target_name = hdu[0].header["OBJECT"]
+
         # apply wavelength and flux calibration
-        cal_wave = apply_wavesol(raw_wave)
+        if use_master_arc is True:
+            wavesol_file = "wavesol.txt"
+        else:
+            wavesol_file = f"wavesol_{target_name}.txt"
+        cal_wave = apply_wavesol(raw_wave, wavesol_file)
         cal_wave, cal_flux = apply_sensfunc(cal_wave, raw_flux)
 
         # telluric correction
@@ -541,8 +586,9 @@ def calibrate_spectra(smoothing=False):
 
         # apply smoothing
         if smoothing is True:
-            spec = Spectrum1D(spectral_axis=cal_wave * u.angstrom,
-                              flux=cal_flux * u.Jy)  # flux units don't matter
+            spec = Spectrum1D(
+                spectral_axis=cal_wave * u.angstrom, flux=cal_flux * u.Jy
+            )  # flux units don't matter
             spec_bsmooth = box_smooth(spec, width=5)
             cal_flux = spec_bsmooth.flux.value
 
