@@ -7,6 +7,9 @@ It is optimised for the blue detector (EEV10).
 [![license](http://img.shields.io/badge/license-MIT-blue.svg?style=flat)](https://github.com/temuller/idsred/blob/master/LICENSE)
 ![Python Version](https://img.shields.io/badge/Python-3.8%2B-blue)
 [![PyPI](https://img.shields.io/pypi/v/idsred?label=PyPI&logo=pypi&logoColor=white)](https://pypi.org/project/idsred/)
+[![DOI](https://zenodo.org/badge/574921206.svg)](https://zenodo.org/badge/latestdoi/574921206)
+
+
 
 ## Installation
 
