@@ -48,6 +48,21 @@ A notebook that explains how to use the pipeline is found in this repository [he
 
 To contribute, either open an issue or send a pull request (preferred option). You can also contact me directly.
 
+## Citing IDSRED
+
+```code
+@software{tomas_e_muller_bravo_2023_7851772,
+  author       = {Tomás E. Müller Bravo},
+  title        = {temuller/idsred: First Release!},
+  month        = apr,
+  year         = 2023,
+  publisher    = {Zenodo},
+  version      = {v0.1.0},
+  doi          = {10.5281/zenodo.7851772},
+  url          = {https://doi.org/10.5281/zenodo.7851772}
+}
+```
+
 ## Acknowledgement
 
 This pipeline is based on the [GROWTH school github repository](https://github.com/growth-astro/growth-school-2020), which nicely explains the entire reduction process for images and spectra, and on [INT-IDS-DataReduction](https://github.com/aayush3009/INT-IDS-DataReduction) for (long-slit) spectra reduction.
