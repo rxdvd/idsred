@@ -233,8 +233,8 @@ def optimised_trace(
         params = results.x
         if params[2] < 20:
             ycenter[icol] = params[1]
-            ywidth[icol] = 2 * params[2]  # aperture width in sigmas units
-            bkg_width[icol] = 6 * params[2]  # beginning of bkg in sigma units
+            ywidth[icol] = 4 * params[2]  # aperture width in sigmas units
+            bkg_width[icol] = 8 * params[2]  # beginning of bkg in sigma units
             model = _get_profile_model(params, ys)
 
             # diagnostic plots for each step
@@ -289,7 +289,7 @@ def optimised_trace(
         trace_bottom = trace - np.median(ywidth)
         bkg_top = trace + np.median(bkg_width)
         bkg_bottom = trace - np.median(bkg_width)
-        sky_width = 50
+        sky_width = 25
 
     # final diagnostic plots
     if plot_diag:
@@ -431,7 +431,7 @@ def optimised_trace(
     return raw_spectrum
 
 
-def quick_1Dreduction(plot_diag=False, plot_trace=False):
+def quick_1Dreduction(plot_diag=False, plot_trace=False, order=3):
     """Performs a "quick" 2D image reduction.
 
     Mostly default parameters are used, but should work in most cases.
@@ -456,7 +456,7 @@ def quick_1Dreduction(plot_diag=False, plot_trace=False):
 
         # extract trace
         raw_spectrum = optimised_trace(
-            hdu, plot_diag=plot_diag, plot_trace=plot_trace
+            hdu, plot_diag=plot_diag, plot_trace=plot_trace, t_order=order
         )
         hdu[0].data = raw_spectrum
         # update header

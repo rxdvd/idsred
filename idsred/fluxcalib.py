@@ -579,6 +579,10 @@ def calibrate_spectra(use_master_arc=False, smoothing=False):
         else:
             wavesol_file = f"wavesol_{target_name}.txt"
         cal_wave = apply_wavesol(raw_wave, wavesol_file)
+        # correct for atmospheric extinction at Observatorio Roque de Los Muchachos
+        airmass = _calc_airmass(hdu)
+        raw_flux = _correct_extinction(cal_wave, raw_flux, airmass)
+
         cal_wave, cal_flux = apply_sensfunc(cal_wave, raw_flux)
 
         # telluric correction

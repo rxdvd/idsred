@@ -11,9 +11,6 @@ from astropy.stats import sigma_clip
 from scipy.optimize import minimize, curve_fit
 from ccdproc import CCDData
 
-import emcee
-import corner
-
 from lmfit import Minimizer, Parameters
 
 import warnings

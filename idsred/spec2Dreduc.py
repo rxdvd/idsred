@@ -84,7 +84,7 @@ def create_images_list(
             )
         if trim_image is True:
             ccd = ccdproc.trim_image(ccd, ccd.header["TRIMSEC"])
-            # ccd = ccdproc.trim_image(ccd[360:3601, :])
+            #ccd = ccdproc.trim_image(ccd[500:3500, :])
         if master_bias is not None:
             ccd = ccdproc.subtract_bias(ccd, master_bias)
         images_list.append(ccd)
@@ -195,9 +195,22 @@ def correct_flat(flat):
     master_flat: array
         Corrected master flat.
     """
-    avcol_in = np.average(
+    avcol_in = np.nanmean(
         flat[:, 30:306].copy(), axis=1
     )  # average column value, avoiding edges
+
+    """
+    pseudo_wave = np.arange(len(avcol_in))
+    import matplotlib.pyplot as plt
+    plt.plot(pseudo_wave, avcol_in)
+    degree = 70
+    coefs = np.polyfit(pseudo_wave, np.nan_to_num(avcol_in, nan=np.nanmean(avcol_in)), degree)
+    avcol_in = np.polyval(coefs, pseudo_wave)
+    #avcol_in[avcol_in<=0] = 0.05
+    plt.plot(pseudo_wave, avcol_in)
+    plt.show()
+    """
+    
     avcol_out = np.concatenate([[avcol_in]] * flat.shape[1], axis=0).T
     master_flat = np.copy(flat / avcol_out)
 
@@ -469,7 +482,7 @@ def reduce_images(
                     )
                 if trim_image is True:
                     ccd = ccdproc.trim_image(ccd, ccd.header["TRIMSEC"])
-                    # ccd = ccdproc.trim_image(ccd[360:3601, :])
+                    #ccd = ccdproc.trim_image(ccd[500:3500, :])
                 if master_bias is not None:
                     ccd = ccdproc.subtract_bias(ccd, master_bias)
                 if master_flat is not None:
