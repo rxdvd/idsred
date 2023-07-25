@@ -106,7 +106,7 @@ def _fit_gauss2peaks(arc_disp, arc_profile, peak_ids, plot_diag=False):
             if np.abs(center - center0) > 4:
                 center = np.inf
 
-            if chi2_red < 1.0:
+            if chi2_red < 0.7:
                 center = np.inf
 
             if plot_diag and np.isfinite(center):
@@ -717,6 +717,7 @@ def find_wavesol(
     plot_solution=False,
     sol_pixels=None,
     sol_waves=None,
+    extract_individual_solutions=False
 ):
     """Finds the wavelength solution.
 
@@ -745,6 +746,8 @@ def find_wavesol(
     sol_waves: array-like, default ``None``
         Center of the emission lines in wavelength units for an initial
         wavelength solution. If ``None``, a precomputed solution is used.
+    extract_individual_solutions: bool, default ``False``
+        If ``True``, the solutions using the arcs for each target are extracted.
     """
     # load master ARC file
     config = dotenv_values(".env")
@@ -785,42 +788,43 @@ def find_wavesol(
         outfile="wavesol.txt",
     )
 
-    # repeat above steps for each target's arc
-    arc_files = glob.glob(os.path.join(PROCESSING, "arc_*.fits"))
-    for arc_file in arc_files:
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", AstropyWarning)
-            arc_ccd = CCDData.read(arc_file)
+    if extract_individual_solutions is True:
+        # repeat above steps for each target's arc
+        arc_files = glob.glob(os.path.join(PROCESSING, "arc_*.fits"))
+        for arc_file in arc_files:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore", AstropyWarning)
+                arc_ccd = CCDData.read(arc_file)
 
-        arc_name = arc_ccd.header["OBJECT"]
-        target_name = arc_name.split("ARC_")[1]
+            arc_name = arc_ccd.header["OBJECT"]
+            target_name = arc_name.split("ARC_")[1]
 
-        # fit and extract peak of the arc lamps
-        data = arc_ccd.data.T
-        arc_pixels, arc_peaks, arc_sigmas = find_arc_peaks(
-            data, plot_solution=True, plot_diag=False
-        )
-        arc_pixels, arc_peaks, arc_sigmas = (
-            arc_pixels[start::step],
-            arc_peaks[start::step],
-            arc_sigmas[start::step],
-        )
+            # fit and extract peak of the arc lamps
+            data = arc_ccd.data.T
+            arc_pixels, arc_peaks, arc_sigmas = find_arc_peaks(
+                data, plot_solution=True, plot_diag=False
+            )
+            arc_pixels, arc_peaks, arc_sigmas = (
+                arc_pixels[start::step],
+                arc_peaks[start::step],
+                arc_sigmas[start::step],
+            )
 
-        print(f"Finding the wavelength solution for {target_name}'s ARC...")
-        quick_wavelength_solution(
-            arc_pixels,
-            lamp_wave,
-            func=func,
-            k=k,
-            params=coefs,
-            niter=niter,
-            sigclip=sigclip,
-            plot_solution=plot_solution,
-            data=data,
-            sol_pixels=sol_pixels,
-            sol_waves=sol_waves,
-            outfile=f"wavesol_{target_name}.txt",
-        )
+            print(f"Finding the wavelength solution for {target_name}'s ARC...")
+            quick_wavelength_solution(
+                arc_pixels,
+                lamp_wave,
+                func=func,
+                k=k,
+                params=coefs,
+                niter=niter,
+                sigclip=sigclip,
+                plot_solution=plot_solution,
+                data=data,
+                sol_pixels=sol_pixels,
+                sol_waves=sol_waves,
+                outfile=f"wavesol_{target_name}.txt",
+            )
 
 
 def save_wavesol(func, xmin, xmax, coefs, outfile):

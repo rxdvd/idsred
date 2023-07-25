@@ -550,7 +550,7 @@ def quick_2Dreduction(
         observations = collect_data()
 
     create_master_arc(
-        observations, beginning=True, method=method, trim_image=trim_image
+        observations, beginning=True, method=method, trim_image=trim_image,
     )
     master_bias = create_master_bias(
         observations,

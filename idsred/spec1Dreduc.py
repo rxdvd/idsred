@@ -218,12 +218,16 @@ def optimised_trace(
                     profile, height=np.nanmedian(profile), prominence=10
                 )[0]
             if len(peaks) > 0:
-                amp = np.max(profile[peaks])
-                peak_id = np.argmax(profile[peaks])
-                center = peaks[peak_id]
+                if amp is None:
+                    amp = np.max(profile[peaks])
+                if center is None:
+                    peak_id = np.argmax(profile[peaks])
+                    center = peaks[peak_id]
             else:
-                amp = 10
-                center = len(profile) // 2
+                if amp is None:
+                    amp = 10
+                if center is None:
+                    center = len(profile) // 2
 
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", UserWarning)
@@ -431,7 +435,7 @@ def optimised_trace(
     return raw_spectrum
 
 
-def quick_1Dreduction(plot_diag=False, plot_trace=False, order=3):
+def quick_1Dreduction(center=None, plot_diag=False, plot_trace=False, order=3):
     """Performs a "quick" 2D image reduction.
 
     Mostly default parameters are used, but should work in most cases.
@@ -455,15 +459,18 @@ def quick_1Dreduction(plot_diag=False, plot_trace=False, order=3):
             header = hdu[0].header
 
         # extract trace
-        raw_spectrum = optimised_trace(
-            hdu, plot_diag=plot_diag, plot_trace=plot_trace, t_order=order
-        )
-        hdu[0].data = raw_spectrum
-        # update header
-        header["NAXIS"] = 1
-        header["NAXIS2"] = len(raw_spectrum)
-        del header["NAXIS2"]
+        try:
+            raw_spectrum = optimised_trace(
+                hdu, center=center, plot_diag=plot_diag, plot_trace=plot_trace, t_order=order
+            )
+            hdu[0].data = raw_spectrum
+            # update header
+            header["NAXIS"] = 1
+            header["NAXIS2"] = len(raw_spectrum)
+            del header["NAXIS2"]
 
-        object_name = os.path.basename(file).split("_")[0]
-        outfile = os.path.join(PROCESSING, f"{object_name}_1d.fits")
-        hdu.writeto(outfile, overwrite=True)
+            object_name = os.path.basename(file).split("_")[0]
+            outfile = os.path.join(PROCESSING, f"{object_name}_1d.fits")
+            hdu.writeto(outfile, overwrite=True)
+        except Exception as exc:
+            print(f'{exc}: {file}')
