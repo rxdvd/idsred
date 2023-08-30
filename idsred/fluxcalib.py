@@ -402,7 +402,8 @@ def fit_sensfunc(
     flux_ratio = interp_calflux / raw_flux
     log_ratio = np.log10(flux_ratio)
 
-    coefs = np.polyfit(cal_wave, log_ratio, degree)
+    mask = (cal_wave > 7500) & (cal_wave < 7700)  # mask out the strong telluric
+    coefs = np.polyfit(cal_wave[~mask], log_ratio[~mask], degree)
     log_sensfunc = np.polyval(coefs, cal_wave)
     sensfunc = 10**log_sensfunc
 
