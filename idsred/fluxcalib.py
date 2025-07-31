@@ -24,7 +24,7 @@ idsred_path = idsred.__path__[0]
 
 # List of extension for the standard stars from the ING catalog.
 # Those with "a." are in AB magnitudes, while those without are in flux (mJy).
-std_extensions = [".oke", ".sto", ".og", "a.oke", "a.sto", "a.og"]
+std_extensions = [".oke", ".sto", ".og", ".mas", "a.oke", "a.sto", "a.og", "a.mas"]
 std_json_file = os.path.join(idsred_path, "standards", "standards.json")
 
 
@@ -186,6 +186,7 @@ def _get_calspec(std_name):
         filename.endswith("a.sto")
         or filename.endswith("a.og")
         or filename.endswith("a.oke")
+        or filename.endswith("a.mas")
     ):
         columns = ["wave", "mag"]
         needs_conversion = True
