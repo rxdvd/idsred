@@ -59,8 +59,9 @@ def download_std(std_name):
     # Download any of the available files (in flux or mag)
     global std_extensions
     for ext in std_extensions:
-        url = os.path.join(os.path.dirname(html), f"{cat_name}{ext}")
+        url = f"{os.path.dirname(html)}/{cat_name}{ext}"
         response = requests.get(url)
+        print(f"{url} - {response.status_code}")
         if response.status_code == 200:
             target_file = os.path.basename(url)
             global idsred_path
